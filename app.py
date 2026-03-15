@@ -6,7 +6,7 @@ from bson.objectid import ObjectId
 
 # --- কনফিগারেশন ---
 MONGO_URI = "mongodb+srv://Demo270:Demo270@cluster0.ls1igsg.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
-BOT_TOKEN = "8796601390:AAFcVGlEaTvBACE-miekOgLok_VRwQ_HSM4"
+BOT_TOKEN = "8796601390:AAFsWMertAVwnnmCL1KT2i6DbH8vHOJirkk"
 BASE_URL = "alquran-dun.vercel.app"
 ADMIN_PASS = "admin123"
 
