@@ -8,7 +8,7 @@ from bson.objectid import ObjectId
 TOKEN = "8796601390:AAGZ_j1ky67kJIlSfnC55CRlu8ivP4XkIvE"
 MONGO_URI = "mongodb+srv://Demo270:Demo270@cluster0.ls1igsg.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
 BASE_URL = "alquran-dun.vercel.app"
-ADMIN_ID = 6363236087  # আপনার টেলিগ্রাম আইডি
+ADMIN_ID = 7120801813  # আপনার টেলিগ্রাম আইডি
 
 app = Flask(__name__)
 bot = telebot.TeleBot(TOKEN, threaded=False)
