@@ -4,7 +4,7 @@ from flask import Flask, request, render_template_string, redirect
 from pymongo import MongoClient
 from bson.objectid import ObjectId
 
-# ================= কনফিগারেশন =================
+# ================= কনফিগারেশন (Configuration) =================
 TOKEN = "8796601390:AAGZ_j1ky67kJIlSfnC55CRlu8ivP4XkIvE"
 MONGO_URI = "mongodb+srv://Demo270:Demo270@cluster0.ls1igsg.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
 BASE_URL = "alquran-dun.vercel.app"
@@ -13,17 +13,14 @@ ADMIN_ID = 7120801813  # আপনার আইডি
 app = Flask(__name__)
 bot = telebot.TeleBot(TOKEN, threaded=False)
 
-# ================= ডাটাবেস কানেকশন =================
-try:
-    client = MongoClient(MONGO_URI)
-    db = client['earning_bot_db']
-    users_col = db['users']
-    settings_col = db['settings']
-    withdraw_col = db['withdrawals']
-except Exception as e:
-    print(f"Database Connection Error: {e}")
+# ================= ডাটাবেস (Database) =================
+client = MongoClient(MONGO_URI)
+db = client['earning_bot_db']
+users_col = db['users']
+settings_col = db['settings']
+withdraw_col = db['withdrawals']
 
-# সেটিংস লোড করার ফাংশন
+# ডিফল্ট সেটিংস লোড করার ফাংশন
 def get_settings():
     settings = settings_col.find_one({"id": "config"})
     if not settings:
@@ -41,7 +38,7 @@ def get_settings():
         return default
     return settings
 
-# ================= টেলিগ্রাম বট হ্যান্ডলার =================
+# ================= বোট কমান্ডস (Bot Commands) =================
 
 @bot.message_handler(commands=['start'])
 def start(message):
@@ -62,7 +59,7 @@ def start(message):
         })
         if ref_by and ref_by != user_id:
             users_col.update_one({"user_id": ref_by}, {"$inc": {"balance": s['per_ref']}})
-            try: bot.send_message(ref_by, f"🎊 রেফার বোনাস {s['per_ref']} {s['currency']} পেয়েছেন।")
+            try: bot.send_message(ref_by, f"🎊 আপনার লিঙ্কে কেউ জয়েন করেছে! আপনি {s['per_ref']} {s['currency']} বোনাস পেয়েছেন।")
             except: pass
 
     markup = telebot.types.InlineKeyboardMarkup()
@@ -81,13 +78,13 @@ def admin_panel(message):
 def show_withdrawals(call):
     pending = withdraw_col.find({"status": "pending"})
     if withdraw_col.count_documents({"status": "pending"}) == 0:
-        bot.send_message(ADMIN_ID, "❌ বর্তমানে কোনো পেন্ডিং উইথড্র রিকোয়েস্ট নেই।")
+        bot.send_message(ADMIN_ID, "❌ পেন্ডিং রিকোয়েস্ট নেই।")
         return
     for req in pending:
         m = telebot.types.InlineKeyboardMarkup()
         m.add(telebot.types.InlineKeyboardButton("✅ Confirm", callback_data=f"pay_confirm_{req['_id']}"),
               telebot.types.InlineKeyboardButton("❌ Reject", callback_data=f"pay_reject_{req['_id']}"))
-        bot.send_message(ADMIN_ID, f"💰 **উইথড্র রিকোয়েস্ট:**\nইউজার আইডি: `{req['user_id']}`\nপরিমাণ: {req['amount']}\nমেথড: {req['method']}", reply_markup=m)
+        bot.send_message(ADMIN_ID, f"💰 **রিকোয়েস্ট:**\nID: `{req['user_id']}`\nপরিমাণ: {req['amount']}\nমেথড: {req['method']}", reply_markup=m)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("pay_"))
 def handle_payment(call):
@@ -96,23 +93,22 @@ def handle_payment(call):
     req = withdraw_col.find_one({"_id": req_id})
     if action == "confirm":
         withdraw_col.update_one({"_id": req_id}, {"$set": {"status": "success"}})
-        bot.send_message(req['user_id'], "✅ অভিনন্দন! আপনার উইথড্র সফল হয়েছে।")
-        bot.edit_message_text("✅ Paid Confirmed", call.message.chat.id, call.message.message_id)
+        bot.send_message(req['user_id'], "✅ অভিনন্দন! আপনার পেমেন্ট সফল হয়েছে।")
+        bot.edit_message_text("✅ Paid Success", call.message.chat.id, call.message.message_id)
     else:
         withdraw_col.update_one({"_id": req_id}, {"$set": {"status": "rejected"}})
         users_col.update_one({"user_id": req['user_id']}, {"$inc": {"balance": req['amount']}})
-        bot.send_message(req['user_id'], "❌ আপনার উইথড্র রিকোয়েস্ট রিজেক্ট করা হয়েছে। ব্যালেন্স ফেরত দেওয়া হয়েছে।")
+        bot.send_message(req['user_id'], "❌ আপনার পেমেন্ট রিজেক্ট করা হয়েছে।")
         bot.edit_message_text("❌ Rejected", call.message.chat.id, call.message.message_id)
 
-# ================= ওয়েবসাইট ড্যাশবোর্ড সেকশন =================
+# ================= ওয়েবসাইট ড্যাশবোর্ড (Web UI) =================
 
 @app.route('/dashboard/<int:user_id>')
 def dashboard(user_id):
     user = users_col.find_one({"user_id": user_id})
-    if not user: return "<h1>User Not Found! Please /start the bot first.</h1>"
+    if not user: return "<h1>User not found!</h1>"
     s = get_settings()
-    # CSS এ ডাবল ব্র্যাকেট {{ }} ব্যবহার করা হয়েছে যাতে পাইথন এরর না দেয়
-    return render_template_string(f"""
+    html = """
     <!DOCTYPE html>
     <html lang="bn">
     <head>
@@ -120,82 +116,82 @@ def dashboard(user_id):
         <title>Dashboard</title>
         <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
         <style>
-            body {{ font-family: sans-serif; background: #f4f6f9; margin: 0; text-align: center; }}
-            .header {{ background: #007bff; color: white; padding: 40px 20px; border-bottom-left-radius: 25px; border-bottom-right-radius: 25px; }}
-            .card {{ background: white; width: 85%; margin: -30px auto 20px; border-radius: 15px; padding: 20px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }}
-            .menu-grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 15px; padding: 20px; }}
-            .menu-item {{ background: white; padding: 20px; border-radius: 12px; text-decoration: none; color: #333; font-weight: bold; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }}
-            .menu-item i {{ display: block; font-size: 28px; color: #007bff; margin-bottom: 10px; }}
-            .btn-earn {{ grid-column: span 2; background: #28a745; color: white !important; }}
-            .btn-earn i {{ color: white; }}
+            body { font-family: sans-serif; background: #f0f2f5; margin: 0; text-align: center; }
+            .header { background: #007bff; color: white; padding: 40px 20px; border-bottom-left-radius: 25px; border-bottom-right-radius: 25px; }
+            .card { background: white; width: 85%; margin: -30px auto 20px; border-radius: 15px; padding: 20px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+            .menu-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; padding: 20px; }
+            .menu-item { background: white; padding: 20px; border-radius: 10px; text-decoration: none; color: #333; font-weight: bold; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+            .btn-earn { grid-column: span 2; background: #28a745; color: white !important; font-size: 1.2rem; }
         </style>
     </head>
     <body>
         <div class="header">
-            <img src="{s['logo']}" width="70" style="border-radius:50%; background:white; padding:5px;">
-            <h2>{s['bot_name']}</h2>
+            <img src="{{logo}}" width="70" style="border-radius:50%; background:white;">
+            <h2>{{bot_name}}</h2>
         </div>
         <div class="card">
             <p style="margin:0; color:#666;">বর্তমান ব্যালেন্স</p>
-            <h1 style="margin:10px 0; color:#28a745;">{user.get('balance', 0):.2f} {s['currency']}</h1>
-            <small>ইউজার আইডি: {user_id}</small>
+            <h1 style="margin:10px 0; color:#28a745;">{{balance}} {{currency}}</h1>
+            <small>মোট ক্লিক: {{clicks}} টি</small>
         </div>
         <div class="menu-grid">
-            <a href="/earn_page/{user_id}" class="menu-item btn-earn"><i class="fas fa-play-circle"></i> 💰 অ্যাড দেখে আয়</a>
-            <a href="javascript:alert('ব্যালেন্স: {user.get('balance', 0):.2f} {s['currency']}\\nক্লিক: {user.get('clicks', 0)} টি')" class="menu-item"><i class="fas fa-wallet"></i> 📊 ব্যালেন্স</a>
-            <a href="/refer_page/{user_id}" class="menu-item"><i class="fas fa-users"></i> 👥 রেফার করুন</a>
-            <a href="/withdraw_page/{user_id}" class="menu-item"><i class="fas fa-money-bill-wave"></i> 💳 টাকা তুলুন</a>
+            <a href="/earn_page/{{user_id}}" class="menu-item btn-earn"><i class="fas fa-play-circle"></i> 💰 অ্যাড দেখে আয়</a>
+            <a href="javascript:alert('ব্যালেন্স: {{balance}} {{currency}}')" class="menu-item"><i class="fas fa-wallet"></i> 📊 ব্যালেন্স</a>
+            <a href="/refer_page/{{user_id}}" class="menu-item"><i class="fas fa-users"></i> 👥 রেফার করুন</a>
+            <a href="/withdraw_page/{{user_id}}" class="menu-item"><i class="fas fa-money-bill-wave"></i> 💳 টাকা তুলুন</a>
         </div>
     </body>
     </html>
-    """)
+    """
+    return render_template_string(html, user_id=user_id, balance=round(user.get('balance', 0), 2), clicks=user.get('clicks', 0), logo=s['logo'], bot_name=s['bot_name'], currency=s['currency'])
 
 @app.route('/refer_page/<int:user_id>')
 def refer_page(user_id):
     bot_info = bot.get_me()
     ref_link = f"https://t.me/{bot_info.username}?start={user_id}"
-    return render_template_string(f"""
+    html = """
     <div style="text-align:center; padding:50px; font-family:sans-serif;">
-        <h2>👥 রেফারেল লিঙ্ক</h2>
-        <div style="background:#f4f4f4; padding:15px; border-radius:10px; border:1px dashed #007bff; word-break:break-all;" id="refLink">{ref_link}</div>
+        <h2>👥 রেফার করুন</h2>
+        <p>রেফার লিঙ্ক কপি করতে নিচের লিঙ্কে ক্লিক করুন</p>
+        <div style="background:#eee; padding:15px; border-radius:10px; word-break:break-all;" id="refText">{{ref_link}}</div>
         <br>
-        <button onclick="copyRef()" style="padding:15px 30px; background:#007bff; color:white; border:none; border-radius:5px; font-size:16px; cursor:pointer;">কপি লিঙ্ক</button>
-        <br><br><a href="/dashboard/{user_id}">ড্যাশবোর্ডে ফিরে যান</a>
+        <button onclick="copyRef()" style="padding:15px 30px; background:#007bff; color:white; border:none; border-radius:5px; cursor:pointer;">লিঙ্ক কপি করুন</button>
+        <br><br><a href="/dashboard/{{user_id}}">ড্যাশবোর্ডে ফিরে যান</a>
         <script>
-            function copyRef() {{
-                var text = document.getElementById("refLink").innerText;
+            function copyRef() {
+                var text = document.getElementById("refText").innerText;
                 var elem = document.createElement("textarea");
                 document.body.appendChild(elem);
                 elem.value = text;
                 elem.select();
                 document.execCommand("copy");
                 document.body.removeChild(elem);
-                alert("লিঙ্কটি কপি করা হয়েছে!");
-            }}
+                alert("লিঙ্ক কপি হয়েছে!");
+            }
         </script>
     </div>
-    """)
+    """
+    return render_template_string(html, ref_link=ref_link, user_id=user_id)
 
 @app.route('/earn_page/<int:user_id>')
 def earn_page(user_id):
     s = get_settings()
-    return render_template_string(f"""
+    html = """
     <body style="text-align:center; padding-top:100px; font-family:sans-serif; background:#f4f4f4;">
-        <script src='//libtl.com/sdk.js' data-zone='{s['monetag_id']}' data-sdk='show_{s['monetag_id']}'></script>
-        <div id="ad-status">
-            <h2>বিজ্ঞাপন লোড হচ্ছে...</h2>
-            <p>৫ সেকেন্ড অপেক্ষা করুন।</p>
-        </div>
-        <button id="claim" style="display:none; padding:15px 40px; background:#28a745; color:white; border:none; border-radius:10px; font-size:22px; cursor:pointer;" onclick="location.href='/claim/{user_id}'">💰 টাকা সংগ্রহ করুন</button>
+        <script src='//libtl.com/sdk.js' data-zone='{{monetag_id}}' data-sdk='show_{{monetag_id}}'></script>
+        <h2>অ্যাড লোড হচ্ছে...</h2>
+        <p id="timer">৫ সেকেন্ড অপেক্ষা করুন</p>
+        <button id="claim" style="display:none; padding:15px 40px; background:#28a745; color:white; border:none; border-radius:10px; font-size:22px; cursor:pointer;" onclick="location.href='/claim/{{user_id}}'">💰 টাকা সংগ্রহ করুন</button>
         <script>
-            setTimeout(() => {{ 
-                if(typeof show_{s['monetag_id']} === 'function') {{ show_{s['monetag_id']}(); }}
-                document.getElementById('ad-status').innerHTML = "<h2>বিজ্ঞাপন দেখা শেষ?</h2>";
+            setTimeout(() => { 
+                if(typeof show_{{monetag_id}} === 'function') { show_{{monetag_id}}(); }
+                document.getElementById('timer').style.display='none';
                 document.getElementById('claim').style.display='inline-block'; 
-            }}, 5000);
+            }, 5000);
         </script>
     </body>
-    """)
+    """
+    return render_template_string(html, monetag_id=s['monetag_id'], user_id=user_id)
 
 @app.route('/claim/<int:user_id>')
 def claim(user_id):
@@ -207,19 +203,20 @@ def claim(user_id):
 def withdraw_page(user_id):
     user = users_col.find_one({"user_id": user_id})
     s = get_settings()
-    return render_template_string(f"""
+    html = """
     <div style="text-align:center; padding:30px; font-family:sans-serif;">
         <h2>💳 টাকা উত্তোলন</h2>
-        <p>ব্যালেন্স: <b>{user.get('balance', 0):.2f} {s['currency']}</b></p>
+        <p>ব্যালেন্স: <b>{{balance}} {{currency}}</b></p>
         <form action="/do_withdraw" method="POST">
-            <input type="hidden" name="user_id" value="{user_id}">
+            <input type="hidden" name="user_id" value="{{user_id}}">
             <input type="text" name="method" placeholder="বিকাশ / নগদ নম্বর" required style="padding:15px; width:85%; margin-bottom:15px; border-radius:8px; border:1px solid #ccc;"><br>
             <input type="number" step="0.01" name="amount" placeholder="পরিমাণ" required style="padding:15px; width:85%; margin-bottom:15px; border-radius:8px; border:1px solid #ccc;"><br>
             <button type="submit" style="padding:15px 30px; background:#007bff; color:white; border:none; border-radius:8px; width:85%; cursor:pointer;">রিকোয়েস্ট পাঠান</button>
         </form>
-        <br><a href="/dashboard/{user_id}">ফিরে যান</a>
+        <br><a href="/dashboard/{{user_id}}">ফিরে যান</a>
     </div>
-    """)
+    """
+    return render_template_string(html, balance=user.get('balance', 0), currency=s['currency'], user_id=user_id)
 
 @app.route('/do_withdraw', methods=['POST'])
 def do_withdraw():
@@ -231,10 +228,10 @@ def do_withdraw():
     if user['balance'] >= amt and amt >= s['min_withdraw']:
         withdraw_col.insert_one({"user_id": uid, "amount": amt, "method": mtd, "status": "pending"})
         users_col.update_one({"user_id": uid}, {"$inc": {"balance": -amt}})
-        return f"<div style='text-align:center; padding:50px;'><h1>✅ সফল!</h1><p>আবেদন জমা হয়েছে।</p><a href='/dashboard/{uid}'>ফিরে যান</a></div>"
+        return f"<div style='text-align:center; padding:50px;'><h1>✅ আবেদন সফল!</h1><a href='/dashboard/{uid}'>ফিরে যান</a></div>"
     return "<h1>ব্যালেন্স কম!</h1>"
 
-# ================= এডমিন প্যানেল =================
+# ================= এডমিন প্যানেল (Web Panel) =================
 
 @app.route('/admin/panel', methods=['GET', 'POST'])
 def admin_web_panel():
@@ -253,27 +250,26 @@ def admin_web_panel():
         return redirect('/admin/panel')
 
     users = users_col.find().limit(20)
-    user_rows = ""
-    for u in users:
-        user_rows += f"<tr><td>{u['user_id']}</td><td>{u['name']}</td><td>{u.get('balance',0):.2f}</td><td><a href='/admin/edit/{u['user_id']}'>এডিট</a></td></tr>"
+    user_rows = "".join([f"<tr><td>{u['user_id']}</td><td>{u['name']}</td><td>{u.get('balance',0):.2f}</td><td><a href='/admin/edit/{u['user_id']}'>এডিট</a></td></tr>" for u in users])
 
-    return render_template_string(f"""
+    html = """
     <div style="padding:20px; font-family:sans-serif;">
         <h2>🛠 এডমিন প্যানেল</h2>
         <form method="POST" style="background:#eee; padding:20px; border-radius:10px;">
-            নাম: <input type="text" name="bot_name" value="{s['bot_name']}"><br>
-            লোগো: <input type="text" name="logo" value="{s['logo']}"><br>
-            মনিটেগ আইডি: <input type="text" name="monetag_id" value="{s['monetag_id']}"><br>
-            ক্লিক বোনাস: <input type="number" step="0.01" name="per_click" value="{s['per_click']}"><br>
-            মিনিমাম উইথড্র: <input type="number" step="1" name="min_withdraw" value="{s['min_withdraw']}"><br>
+            নাম: <input type="text" name="bot_name" value="{{bot_name}}"><br><br>
+            লোগো: <input type="text" name="logo" value="{{logo}}"><br><br>
+            মনিটেগ আইডি: <input type="text" name="monetag_id" value="{{monetag_id}}"><br><br>
+            ক্লিক বোনাস: <input type="number" step="0.01" name="per_click" value="{{per_click}}"><br><br>
+            মিনিমাম উইথড্র: <input type="number" step="1" name="min_withdraw" value="{{min_withdraw}}"><br><br>
             <button type="submit">সেভ সেটিংস</button>
         </form>
         <table border="1" style="width:100%; margin-top:20px; border-collapse:collapse;">
             <tr><th>আইডি</th><th>নাম</th><th>ব্যালেন্স</th><th>অ্যাকশন</th></tr>
-            {user_rows}
+            {{user_rows|safe}}
         </table>
     </div>
-    """)
+    """
+    return render_template_string(html, bot_name=s['bot_name'], logo=s['logo'], monetag_id=s['monetag_id'], per_click=s['per_click'], min_withdraw=s['min_withdraw'], user_rows=user_rows)
 
 @app.route('/admin/edit/<int:uid>', methods=['GET', 'POST'])
 def edit_user(uid):
@@ -287,7 +283,7 @@ def edit_user(uid):
         return redirect('/admin/panel')
     return f"<h2>ইউজার এডিট</h2><form method='POST'>ব্যালেন্স: <input type='number' step='0.1' name='balance' value='{user.get('balance',0)}'><button type='submit'>আপডেট</button><button type='submit' name='action' value='delete' style='color:red;'>ডিলিট ইউজার</button></form>"
 
-# ================= ওয়েব হুক =================
+# ================= ওয়েব হুক (Webhook Logic) =================
 
 @app.route('/' + TOKEN, methods=['POST'])
 def getMessage():
