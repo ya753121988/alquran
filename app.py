@@ -1,57 +1,99 @@
 import os
-from flask import Flask, render_template_string
+from flask import Flask, render_template_string, request, redirect, url_for
 from pymongo import MongoClient
+from bson.objectid import ObjectId
 
 app = Flask(__name__)
 
-# মংগোডিবি কানেকশন
+# আপনার দেওয়া মংগোডিবি কানেকশন
 MONGO_URI = "mongodb+srv://Demo270:Demo270@cluster0.ls1igsg.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
 client = MongoClient(MONGO_URI)
-db = client['web_to_app']
-collection = db['settings']
+db = client['user_apps_db']
+apps_collection = db['apps']
 
+# ডিজাইন (CSS)
+STYLE = """
+<style>
+    body { font-family: 'Arial', sans-serif; background: #f0f2f5; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+    .card { background: white; padding: 30px; border-radius: 15px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); width: 100%; max-width: 400px; text-align: center; }
+    input { width: 100%; padding: 12px; margin: 10px 0; border: 1px solid #ddd; border-radius: 8px; box-sizing: border-box; }
+    .btn { background: #007bff; color: white; padding: 12px; border: none; border-radius: 8px; cursor: pointer; width: 100%; font-size: 16px; }
+    .btn:hover { background: #0056b3; }
+    .result { margin-top: 20px; padding: 15px; background: #e9ecef; border-radius: 8px; word-break: break-all; }
+    iframe { width: 100%; height: 100vh; border: none; margin: 0; padding: 0; }
+    body.app-mode { margin: 0; padding: 0; overflow: hidden; }
+</style>
+"""
+
+# হোম পেজ (ইনপুট ফর্ম)
 @app.route('/')
 def index():
-    # ডাটাবেস থেকে লিঙ্ক নিয়ে আসা
-    data = collection.find_one({}, {"_id": 0, "url": 1})
-    target_url = data['url'] if data else "https://google.com"
+    return render_template_string('''
+    <html><head><title>Web to App Maker</title>''' + STYLE + '''</head>
+    <body>
+        <div class="card">
+            <h2>Web to App Converter</h2>
+            <p>আপনার সাইটের লিঙ্ক দিয়ে অ্যাপ তৈরি করুন</p>
+            <form action="/create" method="POST">
+                <input type="text" name="name" placeholder="অ্যাপের নাম (যেমন: My Blog)" required>
+                <input type="url" name="url" placeholder="সাইট লিঙ্ক (https://...)" required>
+                <button type="submit" class="btn">অ্যাপ তৈরি করুন</button>
+            </form>
+        </div>
+    </body></html>
+    ''')
+
+# অ্যাপ তৈরি এবং ডাটাবেসে সেভ
+@app.route('/create', methods=['POST'])
+def create():
+    app_name = request.form.get('name')
+    app_url = request.form.get('url')
     
-    # HTML যা ওয়েবসাইটটিকে ফুল স্ক্রিন অ্যাপ বানাবে
+    # ডাটাবেসে ইনসার্ট
+    app_data = {"name": app_name, "url": app_url}
+    result = apps_collection.insert_one(app_data)
+    
+    # তৈরি হওয়া অ্যাপের ইউনিক লিঙ্ক
+    app_id = str(result.inserted_id)
+    full_url = request.host_url + "view/" + app_id
+    
+    return render_template_string('''
+    <html><head><title>Success</title>''' + STYLE + '''</head>
+    <body>
+        <div class="card">
+            <h2 style="color: green;">আপনার অ্যাপ তৈরি!</h2>
+            <p>নিচের লিঙ্কটি কপি করে ব্রাউজারে ওপেন করুন এবং "Add to Home Screen" দিন।</p>
+            <div class="result">
+                <a href="{{ url }}" target="_blank">{{ url }}</a>
+            </div>
+            <br><a href="/">নতুন আরেকটি তৈরি করুন</a>
+        </div>
+    </body></html>
+    ''', url=full_url)
+
+# অ্যাপ ভিউ (ফুল স্ক্রিন ইফ্রেমে সাইট দেখানো)
+@app.route('/view/<app_id>')
+def view_app(app_id):
+    app_info = apps_collection.find_one({"_id": ObjectId(app_id)})
+    if not app_info:
+        return "অ্যাপটি খুঁজে পাওয়া যায়নি!", 404
+    
     return render_template_string('''
     <!DOCTYPE html>
-    <html>
+    <html lang="en">
     <head>
+        <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-        <link rel="manifest" href="/manifest.json">
-        <style>
-            body, html { margin: 0; padding: 0; height: 100%; overflow: hidden; }
-            iframe { width: 100%; height: 100%; border: none; }
-        </style>
+        <title>{{ name }}</title>
+        <meta name="mobile-web-app-capable" content="yes">
+        <meta name="apple-mobile-web-app-capable" content="yes">
+        ''' + STYLE + '''
     </head>
-    <body>
+    <body class="app-mode">
         <iframe src="{{ url }}"></iframe>
     </body>
     </html>
-    ''', url=target_url)
-
-# PWA এর জন্য ম্যানিফেস্ট ফাইল
-@app.route('/manifest.json')
-def manifest():
-    return {
-        "name": "Web To App",
-        "short_name": "WebApp",
-        "start_url": "/",
-        "display": "standalone",
-        "background_color": "#ffffff",
-        "theme_color": "#000000",
-        "icons": [
-            {
-                "src": "https://cdn-icons-png.flaticon.com/512/3124/3124822.png",
-                "sizes": "512x512",
-                "type": "image/png"
-            }
-        ]
-    }
+    ''', name=app_info['name'], url=app_info['url'])
 
 if __name__ == '__main__':
     app.run(debug=True)
