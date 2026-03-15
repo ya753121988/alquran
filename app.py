@@ -1,14 +1,19 @@
 import os
-from flask import Flask, request, jsonify, render_template_string, redirect, url_for, session
+from flask import Flask, request, jsonify, render_template_string, redirect, session, url_for
 from pymongo import MongoClient
 from datetime import datetime
 import requests
 
 app = Flask(__name__)
-app.secret_key = "premium_key_99" 
+app.secret_key = "premium_secret_786" # এটি পরিবর্তন করবেন না
 
-# --- ডাটা কানেকশন ---
+# --- আপনার তথ্যসমূহ ---
 MONGO_URI = "mongodb+srv://Demo270:Demo270@cluster0.ls1igsg.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
+BOT_TOKEN = "8796601390:AAFcVGlEaTvBACE-miekOgLok_VRwQ_HSM4"
+BASE_URL = "alquran-dun.vercel.app"
+ADMIN_PASS = "admin123"
+
+# --- ডাটাবেস কানেকশন ---
 client = MongoClient(MONGO_URI)
 db = client['ad_reward_pro']
 users_col = db['users']
@@ -16,96 +21,64 @@ payment_methods_col = db['payment_methods']
 withdraw_col = db['withdrawals']
 settings_col = db['settings']
 
-ADMIN_PASSWORD = "admin123"
-
 def get_settings():
-    default = {
-        "zone_id": "10351894",
-        "sdk_url": "//libtl.com/sdk.js",
-        "frequency": 2, "capping": 0.1, "interval": 30, "timeout": 5
-    }
     s = settings_col.find_one({"type": "ad_config"})
-    return s if s else default
+    if not s:
+        return {"zone_id": "10351894", "sdk_url": "//libtl.com/sdk.js", "frequency": 2, "capping": 0.1, "interval": 30, "timeout": 5}
+    return s
 
-# --- CSS ডিজাইন (Premium Style) ---
-COMMON_STYLE = """
+# --- ডিজাইন (Premium & Responsive) ---
+STYLE = """
 <style>
-    :root { --primary: #6c5ce7; --secondary: #a29bfe; --dark: #2d3436; --success: #00b894; --danger: #d63031; --warning: #fdcb6e; }
-    body { font-family: 'Poppins', sans-serif; background: #f0f2f5; margin: 0; padding: 0; transition: all 0.3s; }
-    .glass { background: rgba(255, 255, 255, 0.9); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.2); box-shadow: 0 8px 32px rgba(0,0,0,0.1); }
-    .btn-premium { border: none; border-radius: 12px; padding: 12px 20px; font-weight: 600; cursor: pointer; transition: 0.3s; display: inline-flex; align-items: center; justify-content: center; gap: 8px; color: white; text-decoration: none; }
-    .btn-premium:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(0,0,0,0.2); opacity: 0.9; }
-    .card { border-radius: 20px; padding: 25px; margin-bottom: 20px; border: none; }
-    input, select { border-radius: 12px; border: 1px solid #ddd; padding: 12px; width: 100%; margin-bottom: 15px; outline: none; transition: 0.3s; }
-    input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(108, 92, 231, 0.2); }
-    
-    /* Responsive Sidebar */
-    .admin-container { display: flex; flex-direction: row; min-height: 100vh; }
-    .sidebar { width: 260px; background: var(--dark); color: white; padding: 20px; transition: 0.3s; }
-    .sidebar h3 { font-size: 1.2rem; margin-bottom: 30px; text-align: center; color: var(--secondary); }
-    .sidebar a { color: #dfe6e9; padding: 12px 15px; display: block; text-decoration: none; border-radius: 10px; margin-bottom: 8px; font-size: 0.95rem; }
-    .sidebar a:hover, .sidebar a.active { background: var(--primary); color: white; }
-    .main-content { flex: 1; padding: 30px; }
-
-    @media (max-width: 768px) {
-        .admin-container { flex-direction: column; }
-        .sidebar { width: 100%; padding: 10px; }
-        .sidebar a { display: inline-block; padding: 8px 12px; font-size: 0.8rem; }
-        .main-content { padding: 15px; }
-    }
+    :root { --p: #6c5ce7; --s: #a29bfe; --bg: #f8f9fa; --card: #ffffff; }
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: var(--bg); margin: 0; padding: 0; }
+    .nav-bar { background: var(--p); color: white; padding: 15px; text-align: center; font-weight: bold; position: sticky; top: 0; z-index: 1000; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+    .container { max-width: 600px; margin: 20px auto; padding: 15px; }
+    .card { background: var(--card); border-radius: 15px; padding: 20px; box-shadow: 0 5px 20px rgba(0,0,0,0.05); margin-bottom: 20px; border: 1px solid #eee; }
+    .btn { display: block; width: 100%; padding: 12px; margin: 10px 0; border: none; border-radius: 10px; font-weight: bold; cursor: pointer; transition: 0.3s; text-decoration: none; text-align: center; }
+    .btn-ad { background: linear-gradient(135deg, var(--p), var(--s)); color: white; }
+    .btn-wd { background: #ff7675; color: white; }
+    .btn-save { background: #00b894; color: white; }
+    input, select { width: 100%; padding: 12px; margin: 10px 0; border-radius: 8px; border: 1px solid #ddd; box-sizing: border-box; }
+    .admin-menu { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-bottom: 20px; }
+    .admin-menu a { background: #dfe6e9; padding: 8px 15px; border-radius: 5px; color: #2d3436; text-decoration: none; font-size: 14px; }
+    .admin-menu a.active { background: var(--p); color: white; }
+    .badge { padding: 5px 10px; border-radius: 50px; font-size: 12px; background: #ffeaa7; }
 </style>
 """
 
-# --- User UI ---
-USER_SITE = """
+# --- USER INTERFACE ---
+USER_UI = """
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Earn Cash 💎</title>
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
-    """ + COMMON_STYLE + """
+    <title>Earn Rewards</title>
+    """ + STYLE + """
     <script src='{{ config.sdk_url }}' data-zone='{{ config.zone_id }}' data-sdk='show_{{ config.zone_id }}'></script>
 </head>
 <body>
-    <div style="max-width: 500px; margin: auto; padding: 20px;">
-        <div class="card glass text-center" style="margin-top: 30px;">
-            <h2 style="color: var(--primary);">💎 Premium Rewards</h2>
-            <p style="color: #636e72;">Welcome, <b>{{ user_id }}</b> 👋</p>
-            
-            <div style="background: linear-gradient(135deg, var(--primary), var(--secondary)); color: white; padding: 25px; border-radius: 18px; margin: 20px 0;">
-                <span style="font-size: 0.9rem; opacity: 0.9;">Available Balance</span>
-                <h1 style="margin: 0; font-size: 2.5rem;"><span id="bal">0</span> <small style="font-size: 1rem;">Pts</small></h1>
-            </div>
+    <div class="nav-bar">💎 PREMIUM REWARDS 💎</div>
+    <div class="container">
+        <div class="card" style="text-align: center;">
+            <p>Welcome, <b>{{ user_id }}</b> 👋</p>
+            <h1 style="margin:0; color:var(--p);"><span id="balance">0</span> <small style="font-size:14px;">Points</small></h1>
+        </div>
 
-            <div style="display: grid; grid-template-columns: 1fr; gap: 15px;">
-                <button onclick="runPop()" class="btn-premium" style="background: var(--success);">
-                    🚀 Watch Pop-up <small>(+10)</small>
-                </button>
-                <button onclick="runInterstitial()" class="btn-premium" style="background: var(--primary);">
-                    📺 Interstitial Ad <small>(+20)</small>
-                </button>
-            </div>
+        <div class="card">
+            <h3 style="margin-top:0;">📺 Watch & Earn</h3>
+            <button class="btn btn-ad" onclick="runAd('pop')">🚀 Watch Pop-up (+10)</button>
+            <button class="btn btn-ad" onclick="runAd('inter')">🎬 Interstitial Ad (+20)</button>
+        </div>
 
-            <hr style="margin: 30px 0; border: 0; border-top: 1px solid #eee;">
-
-            <h3 style="color: var(--dark);">💰 Withdraw Funds</h3>
-            <div style="text-align: left;">
-                <label>Method</label>
-                <select id="method">
-                    {% for m in methods %}
-                    <option value="{{ m.name }}">⭐ {{ m.name }}</option>
-                    {% endfor %}
-                </select>
-                <label>Phone Number</label>
-                <input type="text" id="phone" placeholder="017xxxxxxxx">
-                <label>Points to Redeem</label>
-                <input type="number" id="points" placeholder="Min 1000">
-                <button onclick="submitWithdraw()" class="btn-premium" style="background: var(--danger); width: 100%;">
-                    💸 Send Request
-                </button>
-            </div>
+        <div class="card">
+            <h3 style="margin-top:0;">💸 Withdraw</h3>
+            <select id="method">
+                {% for m in methods %}<option value="{{ m.name }}">{{ m.name }}</option>{% endfor %}
+            </select>
+            <input type="text" id="phone" placeholder="Account Number">
+            <input type="number" id="pts" placeholder="Points (Min 1000)">
+            <button class="btn btn-wd" onclick="requestWd()">Submit Request</button>
         </div>
     </div>
 
@@ -113,234 +86,170 @@ USER_SITE = """
         const zid = "show_{{ config.zone_id }}";
         const uid = "{{ user_id }}";
 
-        window[zid]({
-            type: 'inApp',
-            inAppSettings: {
-                frequency: {{ config.frequency }}, capping: {{ config.capping }},
-                interval: {{ config.interval }}, timeout: {{ config.timeout }}, everyPage: false
-            }
-        });
+        // Automatic In-App
+        window[zid]({ type: 'inApp', inAppSettings: { frequency: {{config.frequency}}, capping: {{config.capping}}, interval: {{config.interval}}, timeout: {{config.timeout}}, everyPage: false } });
 
-        function fetchBal() {
-            fetch('/api/get_user/'+uid).then(r=>r.json()).then(d=>{ document.getElementById('bal').innerText = d.balance; });
+        function updateBal() {
+            fetch('/api/user/'+uid).then(r=>r.json()).then(d=>{ document.getElementById('balance').innerText = d.balance; });
         }
-        fetchBal();
+        updateBal();
 
-        function runPop() {
-            window[zid]('pop').then(() => reward(10)).catch(()=>alert("Ad Not Loaded"));
+        function runAd(type) {
+            if(type=='pop') window[zid]('pop').then(()=>addPts(10)).catch(()=>alert("Ad not ready"));
+            else window[zid]().then(()=>addPts(20));
         }
 
-        function runInterstitial() {
-            window[zid]().then(() => { reward(20); alert("Reward Added! 🎉"); });
+        function addPts(p) {
+            fetch('/api/add', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({uid:uid, pts:p}) }).then(()=>updateBal());
         }
 
-        function reward(pts) {
-            fetch('/api/add_reward', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ user_id: uid, points: pts })
-            }).then(() => fetchBal());
-        }
-
-        function submitWithdraw() {
+        function requestWd() {
             const m = document.getElementById('method').value;
-            const p = document.getElementById('phone').value;
-            const pts = document.getElementById('points').value;
-            if(!p || pts < 1000) return alert("Valid Phone & Min 1000 Pts Required!");
-
-            fetch('/api/withdraw', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ user_id: uid, method: m, phone: p, amount: parseInt(pts) })
-            }).then(r=>r.json()).then(d=> { alert(d.message); fetchBal(); });
+            const ph = document.getElementById('phone').value;
+            const am = document.getElementById('pts').value;
+            if(am < 1000) return alert("Minimum 1000 required");
+            fetch('/api/wd', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({uid:uid, method:m, phone:ph, amount:parseInt(am)}) })
+            .then(r=>r.json()).then(d=>{ alert(d.msg); updateBal(); });
         }
     </script>
 </body>
 </html>
 """
 
-# --- Admin UI ---
-ADMIN_BASE = """
+# --- ADMIN INTERFACE ---
+ADMIN_UI = """
 <!DOCTYPE html>
 <html>
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Admin Dashboard</title>
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
-    """ + COMMON_STYLE + """
+    <title>Admin Panel</title>
+    """ + STYLE + """
 </head>
 <body>
-    <div class="admin-container">
-        <div class="sidebar">
-            <h3>⚡ Admin Panel</h3>
-            <a href="/admin/users">👥 User List</a>
-            <a href="/admin/withdraws">💸 Withdrawals</a>
+    <div class="nav-bar">⚙️ ADMIN CONTROL ⚙️</div>
+    <div class="container">
+        <div class="admin-menu">
+            <a href="/admin/users">👥 Users</a>
+            <a href="/admin/withdraws">💰 Requests</a>
             <a href="/admin/payments">💳 Gateways</a>
-            <a href="/admin/ads">⚙️ Ad Settings</a>
-            <hr>
-            <a href="/admin/logout" style="color: var(--danger);">🛑 Logout</a>
+            <a href="/admin/ads">📺 Ad Settings</a>
+            <a href="/admin/logout" style="color:red;">❌ Logout</a>
         </div>
-        <div class="main-content">
-            <div class="card glass">
-                {% block content %}{% endblock %}
-            </div>
+        <div class="card">
+            {% block content %}{% endblock %}
         </div>
     </div>
 </body>
 </html>
 """
 
-# --- Routes (Backend) ---
+# --- ROUTES ---
 
 @app.route('/')
-def index():
+def home():
     user_id = request.args.get('userId', 'Guest')
-    config = get_settings()
-    methods = list(payment_methods_col.find())
-    return render_template_string(USER_SITE, user_id=user_id, config=config, methods=methods)
+    return render_template_string(USER_UI, user_id=user_id, config=get_settings(), methods=list(payment_methods_col.find()))
 
-@app.route('/api/get_user/<uid>')
-def get_user(uid):
-    user = users_col.find_one({"user_id": uid})
-    return jsonify({"balance": user['balance'] if user else 0})
+@app.route('/api/user/<uid>')
+def api_user(uid):
+    u = users_col.find_one({"user_id": uid})
+    return jsonify({"balance": u['balance'] if u else 0})
 
-@app.route('/api/add_reward', methods=['POST'])
-def add_reward():
-    data = request.json
-    users_col.update_one({"user_id": data['user_id']}, {"$inc": {"balance": data['points']}}, upsert=True)
-    return jsonify({"status": "ok"})
+@app.route('/api/add', methods=['POST'])
+def api_add():
+    d = request.json
+    users_col.update_one({"user_id": d['uid']}, {"$inc": {"balance": d['pts']}}, upsert=True)
+    return jsonify({"status":"ok"})
 
-@app.route('/api/withdraw', methods=['POST'])
-def withdraw():
-    data = request.json
-    user = users_col.find_one({"user_id": data['user_id']})
-    if not user or user['balance'] < data['amount']:
-        return jsonify({"message": "❌ Insufficient balance!"})
-    
-    users_col.update_one({"user_id": data['user_id']}, {"$inc": {"balance": -data['amount']}})
-    withdraw_col.insert_one({
-        "user_id": data['user_id'], "method": data['method'], 
-        "phone": data['phone'], "amount": data['amount'], "status": "Pending", "date": datetime.now()
-    })
-    return jsonify({"message": "✅ Withdrawal request submitted!"})
+@app.route('/api/wd', methods=['POST'])
+def api_wd():
+    d = request.json
+    u = users_col.find_one({"user_id": d['uid']})
+    if not u or u['balance'] < d['amount']: return jsonify({"msg": "Insufficient Balance"})
+    users_col.update_one({"user_id": d['uid']}, {"$inc": {"balance": -d['amount']}})
+    withdraw_col.insert_one({"user_id": d['uid'], "method": d['method'], "phone": d['phone'], "amount": d['amount'], "status": "Pending", "date": datetime.now()})
+    return jsonify({"msg": "Request Sent!"})
 
-# --- Admin Logic ---
+# --- ADMIN ROUTES ---
 
 @app.route('/admin/login', methods=['GET', 'POST'])
-def admin_login():
+def login():
     if request.method == 'POST':
-        if request.form['password'] == ADMIN_PASSWORD:
-            session['admin'] = True
+        if request.form['pw'] == ADMIN_PASS:
+            session['logged_in'] = True
             return redirect('/admin/users')
-    return '<body style="background:#f0f2f5; font-family:sans-serif; display:flex; justify-content:center; align-items:center; height:100vh;"><form method="post" style="background:white; padding:40px; border-radius:20px; box-shadow:0 10px 25px rgba(0,0,0,0.1);"><h2>Admin Login</h2><input name="password" type="password" placeholder="Password" style="width:100%; padding:10px; margin:10px 0;"><button style="width:100%; padding:10px; background:#6c5ce7; color:white; border:none; border-radius:10px;">Login</button></form></body>'
+    return '<div style="text-align:center; padding:50px;"><h2>Admin Login</h2><form method="post"><input type="password" name="pw" placeholder="Password" style="width:200px; padding:10px;"><br><button type="submit" style="padding:10px 20px;">Login</button></form></div>'
 
 @app.route('/admin/logout')
 def logout():
-    session.pop('admin', None)
+    session.clear()
     return redirect('/admin/login')
 
 @app.route('/admin/users')
-def admin_users():
-    if not session.get('admin'): return redirect('/admin/login')
-    search = request.args.get('search', '')
-    users = list(users_col.find({"user_id": {"$regex": search}}))
-    
-    content = f"""
-    <h3>👥 User Management</h3>
-    <form class="d-flex mb-4">
-        <input name="search" class="form-control me-2" placeholder="Search by User ID..." value="{search}">
-        <button class="btn btn-primary">🔍 Search</button>
-    </form>
-    <div class="table-responsive">
-        <table class="table table-hover">
-            <thead><tr><th>User ID</th><th>Balance</th><th>Action</th></tr></thead>
-            <tbody>
-            {"".join([f'<tr><td>{u["user_id"]}</td><td><span class="badge bg-success">{u["balance"]} Pts</span></td><td><a href="/admin/edit_user/{u["user_id"]}" class="btn btn-sm btn-outline-primary">✏️ Edit</a></td></tr>' for u in users])}
-            </tbody>
-        </table>
-    </div>
-    """
-    return render_template_string(ADMIN_BASE, content=content)
+def adm_users():
+    if not session.get('logged_in'): return redirect('/admin/login')
+    search = request.args.get('s', '')
+    users = list(users_col.find({"user_id": {"$regex": search}}).limit(20))
+    html = f'<h3>User List</h3><form><input name="s" placeholder="Search ID..." value="{search}"></form>'
+    for u in users:
+        html += f'<div style="border-bottom:1px solid #eee; padding:10px;">ID: {u["user_id"]} | Bal: {u["balance"]} <a href="/admin/edit/{u["user_id"]}">Edit</a></div>'
+    return render_template_string(ADMIN_UI, content=html)
 
-@app.route('/admin/edit_user/<uid>', methods=['GET', 'POST'])
-def edit_user(uid):
-    if not session.get('admin'): return redirect('/admin/login')
+@app.route('/admin/edit/<uid>', methods=['GET', 'POST'])
+def adm_edit(uid):
+    if not session.get('logged_in'): return redirect('/admin/login')
     if request.method == 'POST':
-        users_col.update_one({"user_id": uid}, {"$set": {"balance": int(request.form['balance'])}})
+        users_col.update_one({"user_id": uid}, {"$set": {"balance": int(request.form['bal'])}})
         return redirect('/admin/users')
-    user = users_col.find_one({"user_id": uid})
-    content = f'<h3>✏️ Edit Balance for {uid}</h3><form method="post">Points: <input name="balance" type="number" value="{user["balance"]}"><br><button class="btn btn-success">Update Points</button></form>'
-    return render_template_string(ADMIN_BASE, content=content)
+    u = users_col.find_one({"user_id": uid})
+    return render_template_string(ADMIN_UI, content=f'<h3>Edit User</h3><form method="post">Balance: <input name="bal" value="{u["balance"]}"><button class="btn btn-save">Update</button></form>')
 
 @app.route('/admin/payments', methods=['GET', 'POST'])
-def admin_payments():
-    if not session.get('admin'): return redirect('/admin/login')
+def adm_pay():
+    if not session.get('logged_in'): return redirect('/admin/login')
     if request.method == 'POST':
         if 'add' in request.form: payment_methods_col.insert_one({"name": request.form['name']})
-        if 'delete' in request.form: payment_methods_col.delete_one({"name": request.form['name']})
-    
-    methods = list(payment_methods_col.find())
-    content = f"""
-    <h3>💳 Payment Gateways</h3>
-    <form method="post" class="mb-4 d-flex gap-2">
-        <input name="name" placeholder="Gateway Name (e.g. bKash)" required>
-        <button name="add" class="btn btn-success" style="height:48px;">➕ Add</button>
-    </form>
-    <div class="list-group">
-        {"".join([f'<div class="list-group-item d-flex justify-content-between align-items-center"><b>{m["name"]}</b> <form method="post" style="margin:0"><input type="hidden" name="name" value="{m["name"]}"><button name="delete" class="btn btn-danger btn-sm">🗑️ Delete</button></form></div>' for m in methods])}
-    </div>
-    """
-    return render_template_string(ADMIN_BASE, content=content)
+        if 'del' in request.form: payment_methods_col.delete_one({"name": request.form['name']})
+    pm = list(payment_methods_col.find())
+    h = '<h3>Gateways</h3><form method="post"><input name="name" placeholder="Name"><button name="add" class="btn btn-save">Add</button></form><hr>'
+    for m in pm: h += f'<div style="padding:10px;">{m["name"]} <form method="post" style="display:inline"><input type="hidden" name="name" value="{m["name"]}"><button name="del" style="color:red">Delete</button></form></div>'
+    return render_template_string(ADMIN_UI, content=h)
 
 @app.route('/admin/ads', methods=['GET', 'POST'])
-def admin_ads():
-    if not session.get('admin'): return redirect('/admin/login')
+def adm_ads():
+    if not session.get('logged_in'): return redirect('/admin/login')
     if request.method == 'POST':
         settings_col.update_one({"type": "ad_config"}, {"$set": {
-            "zone_id": request.form['zone_id'],
-            "sdk_url": request.form['sdk_url'],
-            "frequency": int(request.form['frequency']),
-            "capping": float(request.form['capping']),
-            "interval": int(request.form['interval']),
-            "timeout": int(request.form['timeout'])
+            "zone_id": request.form['zid'], "sdk_url": request.form['sdk'],
+            "frequency": int(request.form['f']), "capping": float(request.form['c']),
+            "interval": int(request.form['i']), "timeout": int(request.form['t'])
         }}, upsert=True)
-    
-    config = get_settings()
-    content = f"""
-    <h3>⚙️ Ad & SDK Configuration</h3>
-    <form method="post">
-        <label>Ad Zone ID</label><input name="zone_id" value="{config['zone_id']}">
-        <label>SDK JS URL</label><input name="sdk_url" value="{config['sdk_url']}">
-        <div class="row">
-            <div class="col-6"><label>Frequency</label><input name="frequency" type="number" value="{config['frequency']}"></div>
-            <div class="col-6"><label>Capping (Hrs)</label><input name="capping" step="0.1" type="number" value="{config['capping']}"></div>
-        </div>
-        <div class="row">
-            <div class="col-6"><label>Interval (Sec)</label><input name="interval" type="number" value="{config['interval']}"></div>
-            <div class="col-6"><label>Delay (Sec)</label><input name="timeout" type="number" value="{config['timeout']}"></div>
-        </div>
-        <button class="btn btn-primary w-100">💾 Save Configuration</button>
-    </form>
-    """
-    return render_template_string(ADMIN_BASE, content=content)
+    c = get_settings()
+    h = f'<h3>Ad Settings</h3><form method="post">Zone ID: <input name="zid" value="{c["zone_id"]}">SDK URL: <input name="sdk" value="{c["sdk_url"]}">Frequency: <input name="f" value="{c["frequency"]}">Capping: <input name="c" value="{c["capping"]}">Interval: <input name="i" value="{c["interval"]}">Timeout: <input name="t" value="{c["timeout"]}"><button class="btn btn-save">Save</button></form>'
+    return render_template_string(ADMIN_UI, content=h)
 
 @app.route('/admin/withdraws')
-def admin_withdraws():
-    if not session.get('admin'): return redirect('/admin/login')
-    reqs = list(withdraw_col.find().sort("date", -1))
-    content = f"""
-    <h3>💸 Pending & Recent Withdrawals</h3>
-    <div class="table-responsive">
-        <table class="table">
-            <thead><tr><th>User</th><th>Method</th><th>Phone</th><th>Amount</th><th>Status</th></tr></thead>
-            <tbody>
-            {"".join([f'<tr><td>{r["user_id"]}</td><td>{r["method"]}</td><td>{r["phone"]}</td><td>{r["amount"]}</td><td><span class="badge bg-warning text-dark">{r["status"]}</span></td></tr>' for r in reqs])}
-            </tbody>
-        </table>
-    </div>
-    """
-    return render_template_string(ADMIN_BASE, content=content)
+def adm_wd():
+    if not session.get('logged_in'): return redirect('/admin/login')
+    wds = list(withdraw_col.find().sort("date", -1))
+    h = '<h3>Withdraw Requests</h3>'
+    for r in wds: h += f'<div style="border:1px solid #ddd; padding:10px; margin-bottom:5px; border-radius:10px;"><b>{r["user_id"]}</b><br>{r["method"]} - {r["phone"]}<br>Amount: {r["amount"]} Pts | {r["status"]}</div>'
+    return render_template_string(ADMIN_UI, content=h)
+
+# --- BOT WEBHOOK ---
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    upd = request.json
+    if "message" in upd:
+        cid = upd["message"]["chat"]["id"]
+        txt = upd["message"].get("text", "")
+        if txt == "/start":
+            url = f"https://{BASE_URL}/?userId={cid}"
+            requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
+                "chat_id": cid, "text": "👋 Welcome! Click the button to earn points.",
+                "reply_markup": {"inline_keyboard": [[{"text": "🚀 Open App", "url": url}]]}
+            })
+    return "OK", 200
 
 if __name__ == '__main__':
     app.run(debug=True)
