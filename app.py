@@ -2,6 +2,7 @@ import os
 from flask import Flask, request, jsonify, render_template_string
 from pymongo import MongoClient
 import requests
+from datetime import datetime
 
 app = Flask(__name__)
 
@@ -14,6 +15,7 @@ BASE_URL = "alquran-dun.vercel.app"
 client = MongoClient(MONGO_URI)
 db = client['ad_reward_db']
 users_col = db['users']
+withdraw_col = db['withdrawals'] # উইথড্র রিকোয়েস্ট জমা হবে এখানে
 
 # --- Frontend HTML ---
 HTML_TEMPLATE = """
@@ -22,79 +24,110 @@ HTML_TEMPLATE = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Earn Rewards - Ads</title>
-    <!-- Ad SDK -->
+    <title>Earn & Withdraw</title>
     <script src='//libtl.com/sdk.js' data-zone='10351894' data-sdk='show_10351894'></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; text-align: center; background-color: #f0f2f5; margin: 0; padding: 20px; }
+        .container { background: white; padding: 20px; border-radius: 15px; max-width: 400px; margin: auto; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+        .balance-box { background: #6c5ce7; color: white; padding: 15px; border-radius: 10px; margin-bottom: 20px; }
+        button { width: 100%; padding: 12px; margin: 8px 0; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 16px; transition: 0.3s; }
+        .btn-ad1 { background: #00b894; color: white; }
+        .btn-ad2 { background: #0984e3; color: white; }
+        .btn-withdraw { background: #d63031; color: white; margin-top: 20px; }
+        input, select { width: 90%; padding: 10px; margin: 10px 0; border: 1px solid #ddd; border-radius: 5px; }
+        .withdraw-section { display: none; margin-top: 20px; border-top: 2px solid #eee; padding-top: 20px; }
+    </style>
 </head>
-<body style="font-family: Arial; text-align: center; padding: 50px; background-color: #f4f4f4;">
-    <div style="background: white; padding: 20px; border-radius: 10px; display: inline-block; box-shadow: 0 0 10px rgba(0,0,0,0.1);">
-        <h2>Watch Ads & Earn</h2>
-        <p>User ID: <span id="userId" style="font-weight: bold; color: blue;">{{ user_id }}</span></p>
-        <p>Your Balance: <span id="balance" style="font-weight: bold; color: green;">Loading...</span></p>
+<body>
+    <div class="container">
+        <h2>Ad Reward App</h2>
+        <div class="balance-box">
+            <p>User ID: {{ user_id }}</p>
+            <h3>Balance: <span id="balance">0</span> Points</h3>
+        </div>
+
+        <button class="btn-ad1" onclick="showPopAd()">Watch Pop-up (10 Pts)</button>
+        <button class="btn-ad2" onclick="showInterstitialAd()">Watch Interstitial (20 Pts)</button>
         
-        <hr>
-        
-        <button onclick="showPopAd()" style="background: #28a745; color: white; border: none; padding: 10px 20px; margin: 10px; cursor: pointer; border-radius: 5px;">
-            Watch Rewarded Pop-up (10 Points)
-        </button>
-        <br>
-        <button onclick="showInterstitialAd()" style="background: #007bff; color: white; border: none; padding: 10px 20px; margin: 10px; cursor: pointer; border-radius: 5px;">
-            Watch Rewarded Interstitial (20 Points)
-        </button>
+        <button class="btn-withdraw" onclick="toggleWithdraw()">Withdraw Money</button>
+
+        <!-- উইথড্র সেকশন -->
+        <div id="withdrawSection" class="withdraw-section">
+            <h3>Withdraw Points</h3>
+            <p style="font-size: 12px; color: red;">Minimum Withdraw: 1000 Points</p>
+            <select id="method">
+                <option value="bKash">bKash</option>
+                <option value="Nagad">Nagad</option>
+                <option value="Rocket">Rocket</option>
+                <option value="Upay">Upay</option>
+            </select>
+            <input type="text" id="phone" placeholder="Enter Account Number">
+            <input type="number" id="amount" placeholder="Enter Points Amount">
+            <button class="btn-ad1" onclick="submitWithdraw()">Submit Request</button>
+        </div>
     </div>
 
     <script>
-        // ১. In-App Interstitial (Automatic)
+        // SDK Initialize
         show_10351894({
           type: 'inApp',
-          inAppSettings: {
-            frequency: 2, capping: 0.1, interval: 30, timeout: 5, everyPage: false
-          }
+          inAppSettings: { frequency: 2, capping: 0.1, interval: 30, timeout: 5, everyPage: false }
         });
 
         const userId = "{{ user_id }}";
 
-        // ব্যালেন্স চেক করার ফাংশন
         function fetchBalance() {
             if(userId === "Guest") return;
-            fetch(`/get_balance?user_id=${userId}`)
-                .then(res => res.json())
-                .then(data => {
-                    document.getElementById('balance').innerText = data.balance + " Points";
-                });
+            fetch(`/get_balance?user_id=${userId}`).then(res => res.json()).then(data => {
+                document.getElementById('balance').innerText = data.balance;
+            });
         }
         fetchBalance();
 
-        // ২. Rewarded Popup
         function showPopAd() {
-            show_10351894('pop').then(() => {
-                updateReward(10);
-            }).catch(e => alert("Ad failed or closed early."));
+            show_10351894('pop').then(() => updateReward(10)).catch(e => alert("Ad closed early."));
         }
 
-        // ৩. Rewarded Interstitial
         function showInterstitialAd() {
             show_10351894().then(() => {
-                alert('Success! You watched the full ad.');
+                alert('Success!');
                 updateReward(20);
             });
         }
 
-        // রিওয়ার্ড আপডেট করার ফাংশন
         function updateReward(points) {
-            if(userId === "Guest") {
-                alert("Please log in via Telegram Bot first!");
-                return;
-            }
+            if(userId === "Guest") return alert("Open via Bot!");
             fetch('/add_reward', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ user_id: userId, points: points })
-            })
-            .then(res => res.json())
-            .then(data => {
+            }).then(res => res.json()).then(data => {
                 alert(data.message);
                 fetchBalance();
+            });
+        }
+
+        function toggleWithdraw() {
+            let section = document.getElementById('withdrawSection');
+            section.style.display = (section.style.display === 'block') ? 'none' : 'block';
+        }
+
+        function submitWithdraw() {
+            const method = document.getElementById('method').value;
+            const phone = document.getElementById('phone').value;
+            const amount = document.getElementById('amount').value;
+
+            if(amount < 1000) return alert("Minimum 1000 points needed!");
+            if(phone.length < 11) return alert("Enter valid phone number!");
+
+            fetch('/request_withdraw', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ user_id: userId, method: method, phone: phone, amount: parseInt(amount) })
+            }).then(res => res.json()).then(data => {
+                alert(data.message);
+                fetchBalance();
+                if(data.success) toggleWithdraw();
             });
         }
     </script>
@@ -107,50 +140,65 @@ def index():
     user_id = request.args.get('userId', 'Guest')
     return render_template_string(HTML_TEMPLATE, user_id=user_id)
 
-# ব্যালেন্স দেখার API
 @app.route('/get_balance')
 def get_balance():
     u_id = request.args.get('user_id')
     user = users_col.find_one({"user_id": str(u_id)})
     return jsonify({"balance": user.get('balance', 0) if user else 0})
 
-# রিওয়ার্ড যোগ করার API
 @app.route('/add_reward', methods=['POST'])
 def add_reward():
     data = request.json
-    u_id = data.get('user_id')
-    points = data.get('points')
-    
+    u_id, points = data.get('user_id'), data.get('points')
     if u_id and u_id != "Guest":
-        users_col.update_one(
-            {"user_id": str(u_id)},
-            {"$inc": {"balance": points}},
-            upsert=True
-        )
-        return jsonify({"message": f"Success! {points} points added."})
-    return jsonify({"message": "Error: User ID not found"}), 400
+        users_col.update_one({"user_id": str(u_id)}, {"$inc": {"balance": points}}, upsert=True)
+        return jsonify({"message": f"{points} points added!"})
+    return jsonify({"message": "Error"}), 400
 
-# টেলিগ্রাম বট ওয়েব হুক
+# --- উইথড্র রিকোয়েস্ট হ্যান্ডেলার ---
+@app.route('/request_withdraw', methods=['POST'])
+def request_withdraw():
+    data = request.json
+    u_id = str(data.get('user_id'))
+    method = data.get('method')
+    phone = data.get('phone')
+    amount = data.get('amount')
+
+    user = users_col.find_one({"user_id": u_id})
+    if not user or user.get('balance', 0) < amount:
+        return jsonify({"success": False, "message": "Insufficient Balance!"})
+
+    # ব্যালেন্স কমানো
+    users_col.update_one({"user_id": u_id}, {"$inc": {"balance": -amount}})
+
+    # উইথড্র ডাটা সেভ করা
+    withdraw_col.insert_one({
+        "user_id": u_id,
+        "method": method,
+        "phone": phone,
+        "amount": amount,
+        "status": "Pending",
+        "date": datetime.now()
+    })
+
+    # বটের মাধ্যমে এডমিনকে জানানো (ঐচ্ছিক)
+    # আপনার চ্যাট আইডিতে মেসেজ পাঠাতে পারেন এখানে
+    
+    return jsonify({"success": True, "message": "Withdraw Request Sent Successfully!"})
+
 @app.route('/webhook', methods=['POST'])
 def webhook():
     update = request.json
     if "message" in update:
         chat_id = update["message"]["chat"]["id"]
         text = update["message"].get("text", "")
-
         if text == "/start":
             url = f"https://{BASE_URL}/?userId={chat_id}"
-            welcome_msg = "Welcome! Click the button below to start earning points by watching ads."
-            
             payload = {
-                "chat_id": chat_id,
-                "text": welcome_msg,
-                "reply_markup": {
-                    "inline_keyboard": [[{"text": "🚀 Open App & Earn", "url": url}]]
-                }
+                "chat_id": chat_id, "text": "Welcome! Earn points and withdraw to bKash/Nagad.",
+                "reply_markup": {"inline_keyboard": [[{"text": "🚀 Open App", "url": url}]]}
             }
             requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json=payload)
-            
     return "OK", 200
 
 if __name__ == '__main__':
