@@ -2,3 +2,6 @@ flask
 pymongo
 dnspython
 requests
+flask
+pymongo
+dnspython
