@@ -24,23 +24,22 @@ COMMON_STYLE = """
     .verse-box { margin-bottom: 25px; padding: 20px; border-bottom: 1px solid #eee; }
     .arabic { font-family: 'Amiri', serif; font-size: 34px; text-align: right; color: #2e7d32; direction: rtl; line-height: 2.0; margin-bottom: 15px; }
     .bangla { font-size: 19px; color: #444; line-height: 1.8; }
-    .btn { background: #27ae60; color: white; padding: 12px 25px; text-decoration: none; border-radius: 8px; border: none; cursor: pointer; display: inline-block; font-size: 16px; }
-    .loading { color: #d35400; font-weight: bold; }
+    .btn { background: #27ae60; color: white; padding: 12px 25px; text-decoration: none; border-radius: 8px; border: none; cursor: pointer; display: inline-block; font-size: 16px; margin-top: 10px; }
 </style>
 """
 
 @app.route('/')
 def index():
+    # ডাটাবেস থেকে সুরা লিস্ট নিয়ে আসা
     surahs = list(collection.find({}, {"_id": 0, "id": 1, "name": 1, "transliteration": 1}).sort("id", 1))
+    
     if not surahs:
         return render_template_string("""
         <html><head>"""+COMMON_STYLE+"""</head><body style="text-align:center; padding:100px;">
         <div class="container">
             <h2>ডেটাবেস খালি</h2>
             <p>১১৪টি সুরা সেটআপ করতে নিচের বাটনে ক্লিক করুন।</p>
-            <form action="/setup" method="POST">
-                <button type="submit" class="btn">সেটআপ শুরু করুন</button>
-            </form>
+            <a href="/setup" class="btn">১১৪টি সুরা সেটআপ করুন</a>
         </div>
         </body></html>
         """)
@@ -64,36 +63,36 @@ def surah_detail(surah_id):
     html += "</div></body></html>"
     return html
 
-# --- সার্ভার-সাইড সেটআপ প্রসেস ---
-@app.route('/setup', methods=['GET', 'POST'])
+# --- এই রুটটি ডেটা সেটআপ করবে ---
+@app.route('/setup')
 def setup_process():
-    if request.method == 'POST':
-        try:
-            # সরাসরি পাইথন দিয়ে ডেটা ডাউনলোড করা হচ্ছে
-            url = "https://cdn.jsdelivr.net/gh/itshatim/quran-json@master/dist/quran_bn.json"
-            response = requests.get(url)
-            
-            if response.status_code != 200:
-                return "ফাইল ডাউনলোড করতে ব্যর্থ হয়েছে। লিঙ্ক চেক করুন।"
-
+    try:
+        # ডেটাবেস থেকে আগে কিছু থাকলে ডিলিট করে ক্লীন করবে
+        collection.delete_many({})
+        
+        # সুরা ডেটা ডাউনলোড করা হচ্ছে (১-৫ সেকেন্ড সময় লাগতে পারে)
+        url = "https://cdn.jsdelivr.net/gh/itshatim/quran-json@master/dist/quran_bn.json"
+        response = requests.get(url)
+        
+        if response.status_code == 200:
             data = response.json()
-            
-            # ডেটাবেসে ইনসার্ট করা (আগে থাকলে ডিলিট করে নতুন করে দেবে)
-            collection.delete_many({}) # ক্লিন সেটআপের জন্য
+            # একসাথে ১১৪টি সুরা ইনসার্ট করা হচ্ছে
             collection.insert_many(data)
             
             return render_template_string("""
             <html><head>"""+COMMON_STYLE+"""</head><body style="text-align:center; padding:100px;">
             <div class="container">
                 <h2 style="color:green;">সাফল্যের সাথে ১১৪টি সুরা সেটআপ হয়েছে!</h2>
+                <p>এখন আপনি কুরআন পড়তে পারবেন।</p>
                 <a href="/" class="btn">হোমে ফিরে যান</a>
             </div>
             </body></html>
             """)
-        except Exception as e:
-            return f"ভুল হয়েছে: {str(e)}"
-    
-    return redirect(url_for('index'))
+        else:
+            return "সার্ভার থেকে ফাইলটি পাওয়া যায়নি। লিঙ্কে সমস্যা হতে পারে।"
+            
+    except Exception as e:
+        return f"ভুল হয়েছে: {str(e)}"
 
 if __name__ == '__main__':
     app.run(debug=True)
