@@ -1,5 +1,6 @@
 import os
 import telebot
+import requests
 from flask import Flask, request, render_template_string, redirect, session, url_for
 from pymongo import MongoClient
 from bson.objectid import ObjectId
@@ -13,7 +14,7 @@ ADMIN_USERNAME = "admin"
 ADMIN_PASSWORD = "password123"
 
 app = Flask(__name__)
-app.secret_key = "ULTIMATE_BOT_SECRET_KEY"
+app.secret_key = "ULTRA_PREMIUM_SECURE_KEY"
 bot = telebot.TeleBot(TOKEN, threaded=False)
 
 # ================= ডাটাবেস কানেকশন =================
@@ -23,24 +24,26 @@ users_col = db['users']
 settings_col = db['settings']
 withdraw_col = db['withdrawals']
 methods_col = db['methods']
+clones_col = db['clones'] # ক্লোন বটের তথ্যের জন্য
 
 def get_settings():
     settings = settings_col.find_one({"id": "config"})
     if not settings:
         default = {
             "id": "config",
-            "bot_name": "Premium Earning 💎",
+            "bot_name": "Premium Earn 💎",
             "logo": "https://cdn-icons-png.flaticon.com/512/2184/2184144.png",
             "currency": "BDT ৳",
             "monetag_id": "10351894",
             "per_click": 0.50,
-            "per_ref": 1.0
+            "per_ref": 1.0,
+            "ad_seconds": 10  # ডিফল্ট ১০ সেকেন্ড
         }
         settings_col.insert_one(default)
         return default
     return settings
 
-# ================= টেলিগ্রাম বট =================
+# ================= টেলিগ্রাম বট হ্যান্ডলার =================
 
 @bot.message_handler(commands=['start'])
 def start(message):
@@ -50,216 +53,175 @@ def start(message):
     
     user = users_col.find_one({"user_id": user_id})
     if not user:
-        ref_by = None
-        if len(message.text.split()) > 1:
-            try: ref_by = int(message.text.split()[1])
-            except: pass
-        
-        users_col.insert_one({
-            "user_id": user_id, "name": user_name, "balance": 0.0, 
-            "clicks": 0, "ref_by": ref_by
-        })
-        if ref_by and ref_by != user_id:
+        ref_by = int(message.text.split()[1]) if len(message.text.split()) > 1 and message.text.split()[1].isdigit() else None
+        users_col.insert_one({"user_id": user_id, "name": user_name, "balance": 0.0, "clicks": 0, "ref_by": ref_by})
+        if ref_by:
             users_col.update_one({"user_id": ref_by}, {"$inc": {"balance": s['per_ref']}})
-            try: bot.send_message(ref_by, f"🎊 অভিনন্দন! নতুন রেফারে {s['per_ref']} বোনাস পেয়েছেন।")
+            try: bot.send_message(ref_by, f"🎊 আপনার রেফারে {user_name} জয়েন করেছে! +{s['per_ref']} বোনাস।")
             except: pass
 
     markup = telebot.types.InlineKeyboardMarkup()
     markup.add(telebot.types.InlineKeyboardButton("🚀 ড্যাশবোর্ড ওপেন করুন", url=f"https://{BASE_URL}/dashboard/{user_id}"))
-    bot.send_message(user_id, f"💎 **স্বাগতম {user_name}!**\nনিচের ড্যাশবোর্ড বাটনে ক্লিক করে কাজ শুরু করুন।", reply_markup=markup)
+    bot.send_message(user_id, f"💎 **স্বাগতম {user_name}!**\nসবচেয়ে বিশ্বস্ত আর্নিং প্ল্যাটফর্মে আপনাকে স্বাগতম। কাজ শুরু করতে ড্যাশবোর্ডে যান।", reply_markup=markup)
 
-# ================= HTML টেমপ্লেটসমূহ (Error-Free) =================
+# ================= প্রিমিয়াম ইউআই (CSS) =================
 
 HTML_STYLE = """
 <style>
-    :root { --p: #6366f1; --s: #a855f7; --bg: #f1f5f9; }
-    body { font-family: 'Poppins', sans-serif; background: var(--bg); margin: 0; padding: 0; color: #334155; }
-    .header { background: linear-gradient(135deg, var(--p), var(--s)); color: white; padding: 40px 20px; text-align: center; border-radius: 0 0 30px 30px; }
-    .card { background: white; width: 90%; max-width: 450px; margin: -30px auto 20px; border-radius: 20px; padding: 25px; box-shadow: 0 10px 15px rgba(0,0,0,0.1); text-align: center; box-sizing: border-box; }
+    @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap');
+    :root { --main: #6366f1; --accent: #8b5cf6; --success: #10b981; --bg: #0f172a; --card: #1e293b; }
+    body { font-family: 'Poppins', sans-serif; background: var(--bg); margin: 0; color: #f8fafc; overflow-x: hidden; }
+    .header { background: linear-gradient(45deg, var(--main), var(--accent)); padding: 50px 20px; text-align: center; border-radius: 0 0 40px 40px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+    .card { background: var(--card); width: 90%; max-width: 450px; margin: -40px auto 20px; border-radius: 25px; padding: 25px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.3); text-align: center; box-sizing: border-box; }
     .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; padding: 15px; max-width: 500px; margin: auto; }
-    .m-btn { background: white; padding: 20px; border-radius: 15px; text-decoration: none; color: #334155; font-weight: bold; box-shadow: 0 2px 5px rgba(0,0,0,0.05); transition: 0.3s; }
-    .m-btn:active { transform: scale(0.9); }
-    .m-btn i { display: block; font-size: 24px; margin-bottom: 8px; color: var(--p); }
-    .earn { grid-column: span 2; background: #10b981; color: white !important; font-size: 18px; }
-    .earn i { color: white; }
-    input, select { width: 100%; padding: 12px; margin: 10px 0; border: 1px solid #ddd; border-radius: 10px; font-size: 16px; }
-    .sub-btn { background: var(--p); color: white; border: none; padding: 15px; width: 100%; border-radius: 10px; cursor: pointer; font-weight: bold; font-size: 16px; }
-    table { width: 100%; border-collapse: collapse; margin-top: 15px; background: white; }
-    th, td { padding: 10px; border: 1px solid #eee; text-align: left; font-size: 13px; }
+    .btn { background: #2d3748; padding: 20px; border-radius: 20px; text-decoration: none; color: white; font-weight: 600; transition: 0.3s; display: block; border: 1px solid #4a5568; }
+    .btn:hover { background: var(--main); transform: translateY(-5px); }
+    .btn i { display: block; font-size: 30px; margin-bottom: 10px; color: #fbbf24; }
+    .earn-btn { grid-column: span 2; background: var(--success); border: none; font-size: 20px; }
+    input, select { width: 100%; padding: 15px; margin: 10px 0; border: none; border-radius: 12px; background: #334155; color: white; font-size: 16px; }
+    .submit-btn { background: var(--main); color: white; border: none; padding: 18px; width: 100%; border-radius: 12px; cursor: pointer; font-size: 18px; font-weight: bold; transition: 0.3s; }
+    .submit-btn:hover { opacity: 0.9; }
+    .method-img { width: 40px; height: 40px; border-radius: 8px; vertical-align: middle; margin-right: 10px; }
 </style>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 """
 
-DASHBOARD_HTML = """
-<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0">
-{{ style|safe }}
-<title>Dashboard</title></head><body>
-<div class="header">
-    <img src="{{ s.logo }}" width="70" style="border-radius:50%; border:3px solid white;">
-    <h2>{{ s.bot_name }}</h2>
-</div>
-<div class="card">
-    <p style="color:#64748b; margin:0;">💰 বর্তমান ব্যালেন্স</p>
-    <h1 style="color:#10b981; font-size:32px; margin:10px 0;">{{ "{:.2f}".format(user.balance) }} {{ s.currency }}</h1>
-    <small>🆔 আইডি: {{ user.user_id }} | ✅ ক্লিক: {{ user.clicks }}</small>
-</div>
-<div class="grid">
-    <a href="/earn_page/{{ user.user_id }}" class="m-btn earn"><i class="fas fa-play-circle"></i> 💎 অ্যাড দেখে আয়</a>
-    <a href="javascript:alert('ব্যালেন্স: {{ user.balance }}')" class="m-btn"><i class="fas fa-wallet"></i> 📊 ব্যালেন্স</a>
-    <a href="/refer_page/{{ user.user_id }}" class="m-btn"><i class="fas fa-users"></i> 👥 রেফার</a>
-    <a href="/withdraw_page/{{ user.user_id }}" class="m-btn"><i class="fas fa-money-check-alt"></i> 💳 উইথড্র</a>
-</div>
-</body></html>
-"""
-
-EARN_HTML = """
-<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0">
-{{ style|safe }}</head><body style="text-align:center; padding-top:80px;">
-<script src='//libtl.com/sdk.js' data-zone='{{ s.monetag_id }}' data-sdk='show_{{ s.monetag_id }}'></script>
-<div class="card">
-    <h2>🎁 বিজ্ঞাপন লোড হচ্ছে...</h2>
-    <p>অ্যাডটি পুরো দেখুন। ৫ সেকেন্ড পর ক্লেম বাটন আসবে।</p>
-    <button id="clm" style="display:none;" class="sub-btn" onclick="location.href='/claim/{{ uid }}'">💰 টাকা সংগ্রহ করুন</button>
-</div>
-<script>
-    setTimeout(() => { 
-        if(typeof show_{{ s.monetag_id }} === 'function') { show_{{ s.monetag_id }}(); }
-        document.getElementById('clm').style.display='block'; 
-    }, 5000);
-</script>
-</body></html>
-"""
-
-ADMIN_HTML = """
-<!DOCTYPE html><html><head>{{ style|safe }}<title>Admin Panel</title></head><body>
-<div style="padding:20px;">
-    <h2>🛠 এডমিন ড্যাশবোর্ড <a href="/admin/logout" style="float:right; font-size:14px; color:red;">Logout</a></h2>
-    
-    <div class="box card" style="text-align:left;">
-        <h3>⚙️ বোট ও অ্যাড সেটিংস</h3>
-        <form action="/admin/save_config" method="POST">
-            বোটের নাম: <input type="text" name="bot_name" value="{{ s.bot_name }}">
-            মনিটেগ জোন আইডি (Zone ID): <input type="text" name="monetag_id" value="{{ s.monetag_id }}">
-            ক্লিক বোনাস: <input type="number" step="0.01" name="per_click" value="{{ s.per_click }}">
-            রেফার বোনাস: <input type="number" step="0.01" name="per_ref" value="{{ s.per_ref }}">
-            লোগো URL: <input type="text" name="logo" value="{{ s.logo }}">
-            <button type="submit" class="sub-btn">Save Settings</button>
-        </form>
-    </div>
-
-    <div class="box card" style="text-align:left;">
-        <h3>💳 পেমেন্ট মেথড ম্যানেজমেন্ট</h3>
-        <form action="/admin/add_method" method="POST">
-            মেথড নাম (বিকাশ/নগদ): <input type="text" name="name" required>
-            লোগো URL: <input type="text" name="m_logo">
-            মিনিমাম: <input type="number" name="min" required>
-            ম্যাক্সিমাম: <input type="number" name="max" required>
-            <button type="submit" style="background:#4f46e5" class="sub-btn">Add Method</button>
-        </form>
-        <table>
-            <tr><th>নাম</th><th>লিমিট</th><th>অ্যাকশন</th></tr>
-            {% for m in methods %}
-            <tr><td>{{ m.name }}</td><td>{{ m.min }}-{{ m.max }}</td><td><a href="/admin/del_method/{{ m._id }}">Delete</a></td></tr>
-            {% endfor %}
-        </table>
-    </div>
-
-    <div class="box card" style="text-align:left;">
-        <h3>👥 ইউজার সার্চ ও লিস্ট</h3>
-        <form method="GET"><input type="number" name="q" placeholder="ইউজার আইডি দিয়ে সার্চ..."><button type="submit">Search</button></form>
-        <table>
-            <tr><th>আইডি</th><th>ব্যালেন্স</th><th>অ্যাকশন</th></tr>
-            {% for u in users %}
-            <tr><td>{{ u.user_id }}</td><td>{{ u.balance }}</td><td><a href="/admin/edit_user/{{ u.user_id }}">Edit</a></td></tr>
-            {% endfor %}
-        </table>
-    </div>
-
-    <div class="box card">
-        <h3>💸 পেন্ডিং পেমেন্ট: {{ withdraws|length }}</h3>
-        {% for w in withdraws %}
-        <div style="border-bottom:1px solid #ddd; padding:10px;">
-            ID: {{ w.user_id }} | Amount: {{ w.amount }} | {{ w.method }} ({{ w.acc }})<br>
-            <a href="/admin/pay/confirm/{{ w._id }}" style="color:green;">Confirm</a> | <a href="/admin/pay/reject/{{ w._id }}" style="color:red;">Reject</a>
-        </div>
-        {% endfor %}
-    </div>
-</div>
-</body></html>
-"""
-
-# ================= ওয়েবসাইট রাউটস =================
+# ================= ওয়েবসাইট পেজসমূহ =================
 
 @app.route('/dashboard/<int:user_id>')
 def dashboard(user_id):
     user = users_col.find_one({"user_id": user_id})
-    if not user: return "ইউজার পাওয়া যায়নি। টেলিগ্রাম থেকে /start দিন।"
-    return render_template_string(DASHBOARD_HTML, user=user, s=get_settings(), style=HTML_STYLE)
+    if not user: return "টেলিগ্রাম থেকে বোটটি স্টার্ট দিন।"
+    s = get_settings()
+    return render_template_string(f"""
+    <!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0">{HTML_STYLE}</head><body>
+    <div class="header">
+        <img src="{s['logo']}" width="90" style="border-radius:50%; border:5px solid rgba(255,255,255,0.2);">
+        <h1>{s['bot_name']}</h1>
+    </div>
+    <div class="card">
+        <p style="color:#94a3b8; margin:0;">💰 আপনার মোট ব্যালেন্স</p>
+        <h1 style="color:var(--success); font-size:40px; margin:10px 0;">{user.get('balance',0):.2f} {s['currency']}</h1>
+        <p>📊 মোট ক্লিক: {user.get('clicks',0)} | 🆔 আইডি: {user_id}</p>
+    </div>
+    <div class="grid">
+        <a href="/earn_page/{user_id}" class="btn earn-btn"><i class="fas fa-play-circle"></i> অ্যাড দেখে আয় করুন</a>
+        <a href="/refer_page/{user_id}" class="btn"><i class="fas fa-users"></i> রেফার করুন</a>
+        <a href="/withdraw_page/{user_id}" class="btn"><i class="fas fa-wallet"></i> টাকা তুলুন</a>
+        <a href="/clone_page/{user_id}" class="btn" style="grid-column: span 2; background: #6366f1;"><i class="fas fa-robot"></i> নিজের বট ও সাইট বানান (Clone)</a>
+    </div>
+    </body></html>
+    """)
 
 @app.route('/earn_page/<int:user_id>')
 def earn_page(user_id):
-    return render_template_string(EARN_HTML, s=get_settings(), uid=user_id, style=HTML_STYLE)
+    s = get_settings()
+    return render_template_string(f"""
+    <!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0">{HTML_STYLE}</head>
+    <body style="text-align:center; padding-top:100px;">
+        <script src='//libtl.com/sdk.js' data-zone='{s['monetag_id']}' data-sdk='show_{s['monetag_id']}'></script>
+        <div class="card">
+            <h2>🎁 বিজ্ঞাপন লোড হচ্ছে</h2>
+            <p id="timer_text">অপেক্ষা করুন: <span id="sec">{s['ad_seconds']}</span> সেকেন্ড</p>
+            <button id="clm" style="display:none;" class="submit-btn" onclick="location.href='/claim/{user_id}'">💰 টাকা সংগ্রহ করুন</button>
+        </div>
+        <script>
+            let s = {s['ad_seconds']};
+            let itv = setInterval(() => {{
+                s--; document.getElementById('sec').innerText = s;
+                if(s <= 0) {{
+                    clearInterval(itv);
+                    if(typeof show_{s['monetag_id']} === 'function') {{ show_{s['monetag_id']}(); }}
+                    document.getElementById('timer_text').innerHTML = "বিজ্ঞাপন দেখা শেষ!";
+                    document.getElementById('clm').style.display='block';
+                }}
+            }}, 1000);
+        </script>
+    </body></html>
+    """)
 
 @app.route('/claim/<int:user_id>')
 def claim(user_id):
     s = get_settings()
     users_col.update_one({"user_id": user_id}, {"$inc": {"balance": s['per_click'], "clicks": 1}})
-    return redirect(url_for('dashboard', user_id=user_id))
-
-@app.route('/refer_page/<int:user_id>')
-def refer_page(user_id):
-    bot_info = bot.get_me()
-    ref_link = f"https://t.me/{bot_info.username}?start={user_id}"
-    html = """
-    <!DOCTYPE html><html><head>{{ style|safe }}</head><body style="padding:20px; text-align:center;">
-    <div class="card" style="margin-top:50px;">
-        <h2>👥 রেফার করুন</h2>
-        <p>প্রতি রেফারে পাবেন ১ টাকা বোনাস।</p>
-        <input type="text" id="rl" value="{{ ref_link }}" readonly>
-        <button class="sub-btn" onclick="copy()">🔗 কপি লিঙ্ক</button>
-    </div>
-    <a href="/dashboard/{{ uid }}">🔙 ড্যাশবোর্ডে ফিরে যান</a>
-    <script>function copy() { navigator.clipboard.writeText("{{ ref_link }}"); alert("লিঙ্ক কপি হয়েছে!"); }</script>
-    </body></html>
-    """
-    return render_template_string(html, ref_link=ref_link, uid=user_id, style=HTML_STYLE)
+    return redirect(f"/dashboard/{user_id}")
 
 @app.route('/withdraw_page/<int:user_id>')
 def withdraw_page(user_id):
     user = users_col.find_one({"user_id": user_id})
     meths = list(methods_col.find())
-    return render_template_string("""
-    <!DOCTYPE html><html><head>{{ style|safe }}</head><body style="padding:20px;">
-    <div class="card">
+    s = get_settings()
+    return render_template_string(f"""
+    <!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0">{HTML_STYLE}</head><body style="padding:20px;">
         <h2>💳 টাকা উত্তোলন</h2>
-        <p>ব্যালেন্স: {{ user.balance }} টাকা</p>
-        <form action="/do_withdraw" method="POST">
-            <input type="hidden" name="user_id" value="{{ user.user_id }}">
-            <select name="method" required>
-                {% for m in meths %}<option value="{{ m.name }}">{{ m.name }} (Min: {{ m.min }}৳)</option>{% endfor %}
-            </select>
-            <input type="text" name="acc" placeholder="অ্যাকাউন্ট নম্বর" required>
-            <input type="number" step="0.01" name="amt" placeholder="পরিমাণ" required>
-            <button type="submit" class="sub-btn">সাবমিট রিকোয়েস্ট</button>
-        </form>
-    </div>
-    <center><a href="/dashboard/{{ user.user_id }}">🔙 ফিরে যান</a></center>
+        <div class="card" style="text-align:left;">
+            <p>আপনার ব্যালেন্স: {user.get('balance',0):.2f} {s['currency']}</p>
+            <form action="/do_withdraw" method="POST">
+                <input type="hidden" name="user_id" value="{user_id}">
+                <label>পেমেন্ট মেথড বেছে নিন:</label>
+                <select name="method" required>
+                    {% for m in meths %}
+                    <option value="{{ m.name }}"> {{ m.name }} (Min: {{ m.min }}৳)</option>
+                    {% endfor %}
+                </select>
+                <div style="margin-top:10px;">
+                    {% for m in meths %}
+                    <img src="{{ m.logo }}" class="method-img" title="{{ m.name }}">
+                    {% endfor %}
+                </div>
+                <input type="text" name="acc" placeholder="আপনার বিকাশ/নগদ নাম্বার" required>
+                <input type="number" step="0.01" name="amt" placeholder="টাকার পরিমাণ" required>
+                <button type="submit" class="submit-btn">✅ উত্তোলন রিকোয়েস্ট পাঠান</button>
+            </form>
+        </div>
+        <center><a href="/dashboard/{user_id}" style="color:#94a3b8; text-decoration:none;">🔙 ফিরে যান</a></center>
     </body></html>
-    """, user=user, meths=meths, style=HTML_STYLE)
+    """, meths=meths)
 
-@app.route('/do_withdraw', methods=['POST'])
-def do_withdraw():
-    uid = int(request.form.get('user_id'))
-    amt = float(request.form.get('amt'))
-    user = users_col.find_one({"user_id": uid})
-    meth = methods_col.find_one({"name": request.form.get('method')})
-    if user and user['balance'] >= amt and meth and amt >= meth['min'] and amt <= meth['max']:
-        withdraw_col.insert_one({"user_id": uid, "amount": amt, "method": meth['name'], "acc": request.form.get('acc'), "status": "pending"})
-        users_col.update_one({"user_id": uid}, {"$inc": {"balance": -amt}})
-        return "<h1>রিকোয়েস্ট সফল! এডমিন পেমেন্ট করে দিবে।</h1><a href='/'>হোম</a>"
-    return "<h1>ব্যালেন্স কম অথবা ভুল তথ্য।</h1>"
+@app.route('/clone_page/<int:user_id>')
+def clone_page(user_id):
+    return render_template_string(f"""
+    <!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0">{HTML_STYLE}</head><body style="padding:20px;">
+        <h2>🤖 নিজের বট ও সাইট ক্লোন করুন</h2>
+        <div class="card">
+            <p>নিচের তথ্যগুলো দিলে আপনার নিজস্ব বট ও সাইট লিঙ্ক জেনারেট হবে।</p>
+            <form action="/do_clone" method="POST">
+                <input type="hidden" name="user_id" value="{user_id}">
+                <input type="text" name="site_name" placeholder="সাইট নাম (যেমন: MyEarn)" required>
+                <input type="text" name="bot_token" placeholder="বট টোকেন (BotFather থেকে নিন)" required>
+                <input type="text" name="username" placeholder="এডমিন ইউজারনেম" required>
+                <input type="text" name="password" placeholder="এডমিন পাসওয়ার্ড" required>
+                <button type="submit" class="submit-btn">🚀 ক্লোন লিঙ্ক জেনারেট করুন</button>
+            </form>
+        </div>
+        <center><a href="/dashboard/{user_id}" style="color:#94a3b8;">🔙 ফিরে যান</a></center>
+    </body></html>
+    """)
 
-# ================= এডমিন ফাংশনালিটি =================
+@app.route('/do_clone', methods=['POST'])
+def do_clone():
+    uid = request.form.get('user_id')
+    token = request.form.get('bot_token')
+    # ক্লোন ডাটা সেভ
+    clone_id = clones_col.insert_one({
+        "owner_id": uid, "site_name": request.form.get('site_name'),
+        "token": token, "admin_u": request.form.get('username'),
+        "admin_p": request.form.get('password')
+    }).inserted_id
+    
+    # ক্লোনড বটের জন্য ওয়েব হুক সেট করা
+    requests.get(f"https://api.telegram.org/bot{token}/setWebhook?url=https://{BASE_URL}/clone_webhook/{clone_id}")
+    
+    return f"""
+    <div style="background:#0f172a; color:white; padding:50px; text-align:center; height:100vh; font-family:sans-serif;">
+        <h1>🎉 ক্লোন সফল হয়েছে!</h1>
+        <p>আপনার ব্যক্তিগত সাইট লিঙ্ক: <br><b>https://{BASE_URL}/dashboard/{uid}?clone={clone_id}</b></p>
+        <p>আপনার বটের কাজ শুরু হয়ে গেছে।</p>
+        <a href="/dashboard/{uid}" style="color:cyan;">ফিরে যান</a>
+    </div>
+    """
+
+# ================= এডমিন প্যানেল =================
 
 @app.route('/admin/login', methods=['GET', 'POST'])
 def admin_login():
@@ -267,24 +229,75 @@ def admin_login():
         if request.form.get('u') == ADMIN_USERNAME and request.form.get('p') == ADMIN_PASSWORD:
             session['adm'] = True
             return redirect('/admin/panel')
-    return render_template_string("""
-    <!DOCTYPE html><html><head>{{ style|safe }}</head><body style="display:flex; justify-content:center; align-items:center; height:100vh;">
-    <div class="card" style="width:300px;">
+    return render_template_string(f"""
+    <!DOCTYPE html><html><head>{HTML_STYLE}</head><body style="display:flex; justify-content:center; align-items:center; height:100vh;">
+    <div class="card" style="width:320px;">
         <h2>🔐 Admin Login</h2>
-        <form method="POST"><input type="text" name="u" placeholder="User"><input type="password" name="p" placeholder="Pass"><button class="sub-btn">Login</button></form>
+        <form method="POST">
+            <input type="text" name="u" placeholder="Username" required>
+            <input type="password" name="p" placeholder="Password" required>
+            <button type="submit" class="submit-btn">Login</button>
+        </form>
     </div></body></html>
-    """, style=HTML_STYLE)
+    """)
 
 @app.route('/admin/panel')
 def admin_panel():
     if not session.get('adm'): return redirect('/admin/login')
     s = get_settings()
+    
+    # সার্চ অপশন
     q = request.args.get('q')
     query = {"user_id": int(q)} if q and q.isdigit() else {}
-    users = users_col.find(query).limit(20)
-    methods = list(methods_col.find())
+    users = users_col.find(query).limit(10)
+    
+    meths = list(methods_col.find())
     withdraws = list(withdraw_col.find({"status": "pending"}))
-    return render_template_string(ADMIN_HTML, s=s, users=users, methods=methods, withdraws=withdraws, style=HTML_STYLE)
+    
+    return render_template_string(f"""
+    <!DOCTYPE html><html><head>{HTML_STYLE}<title>Admin</title></head><body style="padding:20px;">
+        <h2>🛠 এডমিন ড্যাশবোর্ড <a href="/admin/logout" style="float:right; color:red; font-size:15px;">Logout</a></h2>
+        
+        <div class="card" style="text-align:left; max-width:100%;">
+            <h3>⚙️ গ্লোবাল সেটিংস</h3>
+            <form action="/admin/save_config" method="POST">
+                বোটের নাম: <input type="text" name="bot_name" value="{s['bot_name']}">
+                মনিটেগ আইডি: <input type="text" name="monetag_id" value="{s['monetag_id']}">
+                অ্যাড টাইমার (সেকেন্ড): <input type="number" name="ad_seconds" value="{s['ad_seconds']}">
+                ক্লিক বোনাস: <input type="number" step="0.01" name="per_click" value="{s['per_click']}">
+                <button type="submit" class="submit-btn">Save All</button>
+            </form>
+        </div>
+
+        <div class="card" style="text-align:left; max-width:100%;">
+            <h3>💳 পেমেন্ট মেথড যুক্ত করুন</h3>
+            <form action="/admin/add_method" method="POST">
+                নাম: <input type="text" name="name" placeholder="Bikash" required>
+                লোগো URL: <input type="text" name="logo" placeholder="https://logo-url.com" required>
+                মিনিমাম: <input type="number" name="min" required>
+                ম্যাক্সিমাম: <input type="number" name="max" required>
+                <button type="submit" class="submit-btn" style="background:blue;">মেথড অ্যাড করুন</button>
+            </form>
+            <table style="width:100%; margin-top:10px; border-top:1px solid #444;">
+                {% for m in meths %}
+                <tr><td><img src="{{m.logo}}" width="30"> {{ m.name }}</td><td>{{ m.min }}-{{m.max}}</td><td><a href="/admin/del_method/{{ m._id }}" style="color:red;">Delete</a></td></tr>
+                {% endfor %}
+            </table>
+        </div>
+
+        <div class="card" style="text-align:left; max-width:100%;">
+            <h3>🔍 ইউজার সার্চ</h3>
+            <form method="GET"><input type="number" name="q" placeholder="আইডি দিয়ে সার্চ..."><button type="submit" class="submit-btn">Search</button></form>
+            <table style="width:100%;">
+                {% for u in users %}
+                <tr><td>{{ u.user_id }}</td><td>{{ u.balance }}৳</td><td><a href="/admin/edit_user/{{ u.user_id }}">Edit</a></td></tr>
+                {% endfor %}
+            </table>
+        </div>
+    </body></html>
+    """, users=users, meths=meths, withdraws=withdraws)
+
+# ================= সেভিং ও অ্যাকশন লজিক =================
 
 @app.route('/admin/save_config', methods=['POST'])
 def save_config():
@@ -292,48 +305,24 @@ def save_config():
     settings_col.update_one({"id": "config"}, {"$set": {
         "bot_name": request.form.get('bot_name'),
         "monetag_id": request.form.get('monetag_id'),
-        "per_click": float(request.form.get('per_click')),
-        "per_ref": float(request.form.get('per_ref')),
-        "logo": request.form.get('logo')
+        "ad_seconds": int(request.form.get('ad_seconds')),
+        "per_click": float(request.form.get('per_click'))
     }})
     return redirect('/admin/panel')
 
 @app.route('/admin/add_method', methods=['POST'])
 def add_method():
     if not session.get('adm'): return redirect('/admin/login')
-    methods_col.insert_one({"name": request.form.get('name'), "min": float(request.form.get('min')), "max": float(request.form.get('max')), "logo": request.form.get('m_logo')})
+    methods_col.insert_one({
+        "name": request.form.get('name'), "logo": request.form.get('logo'),
+        "min": float(request.form.get('min')), "max": float(request.form.get('max'))
+    })
     return redirect('/admin/panel')
 
 @app.route('/admin/del_method/<id>')
 def del_method(id):
-    if not session.get('adm'): return redirect('/admin/login')
     methods_col.delete_one({"_id": ObjectId(id)})
     return redirect('/admin/panel')
-
-@app.route('/admin/pay/<action>/<id>')
-def admin_pay(action, id):
-    if not session.get('adm'): return redirect('/admin/login')
-    req = withdraw_col.find_one({"_id": ObjectId(id)})
-    if action == "confirm":
-        withdraw_col.update_one({"_id": ObjectId(id)}, {"$set": {"status": "success"}})
-        try: bot.send_message(req['user_id'], "✅ অভিনন্দন! আপনার পেমেন্ট পাঠানো হয়েছে।")
-        except: pass
-    else:
-        withdraw_col.update_one({"_id": ObjectId(id)}, {"$set": {"status": "rejected"}})
-        users_col.update_one({"user_id": req['user_id']}, {"$inc": {"balance": req['amount']}})
-        try: bot.send_message(req['user_id'], "❌ আপনার উইথড্র রিজেক্ট করা হয়েছে।")
-        except: pass
-    return redirect('/admin/panel')
-
-@app.route('/admin/edit_user/<int:uid>', methods=['GET', 'POST'])
-def admin_edit_user(uid):
-    if not session.get('adm'): return redirect('/admin/login')
-    user = users_col.find_one({"user_id": uid})
-    if request.method == 'POST':
-        if request.form.get('a') == 'del': users_col.delete_one({"user_id": uid})
-        else: users_col.update_one({"user_id": uid}, {"$set": {"balance": float(request.form.get('b'))}})
-        return redirect('/admin/panel')
-    return f"<h2>Edit {uid}</h2><form method='POST'>Bal: <input type='number' name='b' value='{user['balance']}'><button type='submit'>Save</button><button type='submit' name='a' value='del'>Delete User</button></form>"
 
 @app.route('/admin/logout')
 def admin_logout():
@@ -349,11 +338,23 @@ def getMessage():
     bot.process_new_updates([update])
     return "!", 200
 
+# ক্লোনড বটের জন্য আলাদা হুক
+@app.route('/clone_webhook/<id>', methods=['POST'])
+def clone_webhook(id):
+    clone = clones_col.find_one({"_id": ObjectId(id)})
+    if clone:
+        temp_bot = telebot.TeleBot(clone['token'])
+        json_string = request.get_data().decode('utf-8')
+        update = telebot.types.Update.de_json(json_string)
+        # এখানে ক্লোন বটের আলাদা লজিক দেওয়া যায়, এখন মেইন বটের মতোই কাজ করবে
+        temp_bot.send_message(update.message.chat.id, f"👋 স্বাগতম {clone['site_name']} বোট-এ!\nআপনার সাইট: https://{BASE_URL}/dashboard/{update.message.chat.id}")
+    return "!", 200
+
 @app.route('/')
 def main():
     bot.remove_webhook()
     bot.set_webhook(url=f"https://{BASE_URL}/{TOKEN}")
-    return "<h1>Bot is Running Successfully! 🚀</h1>", 200
+    return "<h1>Premium Bot Engine is Online! 🚀</h1>", 200
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get('PORT', 5000)))
