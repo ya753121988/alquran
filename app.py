@@ -2,139 +2,204 @@ import os
 import telebot
 from flask import Flask, request, render_template_string
 from pymongo import MongoClient
+from bson.objectid import ObjectId
 
-# আপনার দেওয়া তথ্যসমূহ
+# --- কনফিগারেশন ---
 TOKEN = "8796601390:AAGZ_j1ky67kJIlSfnC55CRlu8ivP4XkIvE"
 MONGO_URI = "mongodb+srv://Demo270:Demo270@cluster0.ls1igsg.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
 BASE_URL = "alquran-dun.vercel.app"
-AD_SCRIPT = "<script src='//libtl.com/sdk.js' data-zone='10351894' data-sdk='show_10351894'></script>"
-ADMIN_ID = 8796601390  # আপনার নিজের টেলিগ্রাম আইডি এখানে দিন (উইথড্র রিকোয়েস্ট পাওয়ার জন্য)
+ADMIN_ID = 7120801813 # আপনার নিজের টেলিগ্রাম আইডি এখানে দিন
 
 app = Flask(__name__)
 bot = telebot.TeleBot(TOKEN, threaded=False)
 
-# MongoDB কানেকশন
+# --- MongoDB কানেকশন ---
 client = MongoClient(MONGO_URI)
 db = client['earning_bot_db']
 users_col = db['users']
+settings_col = db['settings']
+withdraw_col = db['withdrawals']
 
-# মেইন মেনু রিপ্লাই মার্কআপ (সহজে ব্যবহারের জন্য)
+# --- ডিফল্ট সেটিংস চেক ---
+def get_settings():
+    settings = settings_col.find_one({"id": "config"})
+    if not settings:
+        default_settings = {
+            "id": "config",
+            "bot_name": "Earning Bot",
+            "logo": "https://via.placeholder.com/150",
+            "currency": "BDT",
+            "min_withdraw": 20.0,
+            "max_withdraw": 500.0,
+            "monetag_id": "10351894",
+            "per_click": 0.50,
+            "per_ref": 1.0,
+            "menu_earn": "💰 অ্যাড দেখে আয়",
+            "menu_bal": "📊 ব্যালেন্স",
+            "menu_ref": "👥 রেফার করুন",
+            "menu_wit": "💳 টাকা তুলুন"
+        }
+        settings_col.insert_one(default_settings)
+        return default_settings
+    return settings
+
+# --- কিবোর্ড জেনারেটর ---
 def main_menu():
-    markup = telebot.types.InlineKeyboardMarkup()
-    earn_btn = telebot.types.InlineKeyboardButton("💰 অ্যাড দেখে আয়", url=f"https://{BASE_URL}/earn/")
-    bal_btn = telebot.types.InlineKeyboardButton("📊 ব্যালেন্স", callback_data="check_bal")
-    ref_btn = telebot.types.InlineKeyboardButton("👥 রেফার করুন", callback_data="referral")
-    withdraw_btn = telebot.types.InlineKeyboardButton("💳 টাকা তুলুন", callback_data="withdraw")
-    markup.row(earn_btn)
-    markup.row(bal_btn, ref_btn)
-    markup.row(withdraw_btn)
+    s = get_settings()
+    markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.row(s['menu_earn'], s['menu_bal'])
+    markup.row(s['menu_ref'], s['menu_wit'])
+    if True: # Admin check logic here if needed
+        pass 
     return markup
 
-# টেলিগ্রাম বটের স্টার্ট কমান্ড
+# --- টেলিগ্রাম বট হ্যান্ডলার ---
+
 @bot.message_handler(commands=['start'])
 def start(message):
     user_id = message.chat.id
-    user = users_col.find_one({"user_id": user_id})
+    user_name = message.from_user.first_name
+    s = get_settings()
     
-    # রেফারেল চেক
-    ref_by = None
-    if len(message.text.split()) > 1:
-        ref_by = message.text.split()[1]
-        if ref_by.isdigit():
-            ref_by = int(ref_by)
-
+    user = users_col.find_one({"user_id": user_id})
     if not user:
-        new_user = {"user_id": user_id, "balance": 0.0, "clicks": 0, "referred_by": ref_by}
-        users_col.insert_one(new_user)
+        # রেফারেল চেক
+        ref_by = None
+        if len(message.text.split()) > 1:
+            ref_id = message.text.split()[1]
+            if ref_id.isdigit(): ref_by = int(ref_id)
         
-        # রেফারারকে বোনাস দেওয়া (যেমন: ১ টাকা)
-        if ref_by and ref_by != user_id:
-            users_col.update_one({"user_id": ref_by}, {"$inc": {"balance": 1.0}})
-            try:
-                bot.send_message(ref_by, f"🎊 আপনার লিঙ্কে একজন জয়েন করেছে! আপনি ১.০০ টাকা রেফার বোনাস পেয়েছেন।")
-            except:
-                pass
+        users_col.insert_one({
+            "user_id": user_id, "name": user_name, "balance": 0.0, 
+            "clicks": 0, "ref_by": ref_by
+        })
+        
+        if ref_by:
+            users_col.update_one({"user_id": ref_by}, {"$inc": {"balance": s['per_ref']}})
+            bot.send_message(ref_by, f"🎊 নতুন রেফারাল! আপনি {s['per_ref']} {s['currency']} পেয়েছেন।")
+
+    bot.send_photo(user_id, s['logo'], caption=f"স্বাগতম {user_name}!\nআমাদের **{s['bot_name']}** এ আপনি অ্যাড দেখে আয় করতে পারবেন।", reply_markup=main_menu())
+
+@bot.message_handler(commands=['admin'])
+def admin_panel(message):
+    if message.chat.id != ADMIN_ID: return
+    markup = telebot.types.InlineKeyboardMarkup()
+    markup.add(telebot.types.InlineKeyboardButton("⚙️ সেটিংস পরিবর্তন", callback_data="adm_settings"))
+    markup.add(telebot.types.InlineKeyboardButton("👥 ইউজার ম্যানেজ", callback_data="adm_users"))
+    markup.add(telebot.types.InlineKeyboardButton("💸 উইথড্র রিকোয়েস্ট", callback_data="adm_withdraws"))
+    bot.send_message(message.chat.id, "🛠 এডমিন প্যানেল", reply_markup=markup)
+
+# --- এডমিন সেটিংস হ্যান্ডলার ---
+@bot.callback_query_handler(func=lambda call: call.data.startswith("adm_"))
+def admin_callbacks(call):
+    if call.from_user.id != ADMIN_ID: return
     
-    bot.send_message(user_id, "👋 স্বাগতম! অ্যাড দেখে আয় করতে নিচের বাটনে ক্লিক করুন।", reply_markup=main_menu())
+    if call.data == "adm_settings":
+        s = get_settings()
+        text = f"🤖 নাম: {s['bot_name']}\n💰 কারেন্সি: {s['currency']}\n🎯 Monetag ID: {s['monetag_id']}\n💳 Min: {s['min_withdraw']} | Max: {s['max_withdraw']}"
+        markup = telebot.types.InlineKeyboardMarkup()
+        markup.add(telebot.types.InlineKeyboardButton("নাম পরিবর্তন", callback_data="edit_bot_name"))
+        markup.add(telebot.types.InlineKeyboardButton("Monetag ID পরিবর্তন", callback_data="edit_monetag"))
+        markup.add(telebot.types.InlineKeyboardButton("মিনিমাম উইথড্র", callback_data="edit_min"))
+        bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup)
 
-# সব কলব্যাক হ্যান্ডলার (বাটন ক্লিক)
-@bot.callback_query_handler(func=lambda call: True)
-def callback_handler(call):
-    user_id = call.from_user.id
-    user = users_col.find_one({"user_id": user_id})
+    elif call.data == "adm_withdraws":
+        pending = withdraw_col.find({"status": "pending"})
+        if withdraw_col.count_documents({"status": "pending"}) == 0:
+            bot.answer_callback_query(call.id, "কোন রিকোয়েস্ট নেই।")
+            return
+        for req in pending:
+            markup = telebot.types.InlineKeyboardMarkup()
+            markup.add(
+                telebot.types.InlineKeyboardButton("✅ Confirm", callback_data=f"pay_confirm_{req['_id']}"),
+                telebot.types.InlineKeyboardButton("❌ Reject", callback_data=f"pay_reject_{req['_id']}")
+            )
+            bot.send_message(ADMIN_ID, f"💰 **উইথড্র রিকোয়েস্ট**\nইউজার: {req['user_id']}\nপরিমাণ: {req['amount']}\nমেথড: {req['method']}", reply_markup=markup)
 
-    if call.data == "check_bal":
-        bot.answer_callback_query(call.id)
-        bot.send_message(user_id, f"👤 আইডি: {user['user_id']}\n💰 ব্যালেন্স: {user['balance']:.2f} টাকা\n✅ মোট ক্লিক: {user['clicks']}")
-
-    elif call.data == "referral":
-        bot.answer_callback_query(call.id)
-        bot_info = bot.get_me()
-        ref_link = f"https://t.me/{bot_info.username}?start={user_id}"
-        msg = f"👥 আপনার রেফারেল লিঙ্ক:\n{ref_link}\n\nপ্রতি রেফারে পাবেন ১.০০ টাকা বোনাস!"
-        bot.send_message(user_id, msg)
-
-    elif call.data == "withdraw":
-        bot.answer_callback_query(call.id)
-        if user['balance'] < 20.0:
-            bot.send_message(user_id, "⚠️ আপনার ব্যালেন্স ২০ টাকার কম। টাকা তুলতে অন্তত ২০ টাকা প্রয়োজন।")
-        else:
-            msg = bot.send_message(user_id, "আপনার বিকাশ/নগদ নাম্বার এবং কত টাকা তুলতে চান লিখে পাঠান।\nউদাহরণ: 01710XXXXXX - 50 TK")
-            bot.register_next_step_handler(msg, process_withdraw)
-
-def process_withdraw(message):
-    user_id = message.chat.id
-    details = message.text
-    user = users_col.find_one({"user_id": user_id})
+# --- পেমেন্ট কনফার্ম/রিজেক্ট ---
+@bot.callback_query_handler(func=lambda call: call.data.startswith("pay_"))
+def handle_payment(call):
+    action = call.data.split("_")[1]
+    req_id = ObjectId(call.data.split("_")[2])
+    req = withdraw_col.find_one({"_id": req_id})
     
-    if user['balance'] >= 20.0:
-        # এডমিনকে জানানো
-        bot.send_message(ADMIN_ID, f"🔔 **নতুন উইথড্র রিকোয়েস্ট!**\n\nইউজার আইডি: `{user_id}`\nবিস্তারিত: {details}\nব্যালেন্স: {user['balance']} টাকা")
-        bot.send_message(user_id, "✅ আপনার রিকোয়েস্ট এডমিনের কাছে পাঠানো হয়েছে। ২৪ ঘন্টার মধ্যে পেমেন্ট পাবেন।")
+    if action == "confirm":
+        withdraw_col.update_one({"_id": req_id}, {"$set": {"status": "success"}})
+        bot.send_message(req['user_id'], "✅ আপনার পেমেন্ট সফলভাবে পাঠানো হয়েছে।")
     else:
-        bot.send_message(user_id, "❌ পর্যাপ্ত ব্যালেন্স নেই।")
+        withdraw_col.update_one({"_id": req_id}, {"$set": {"status": "rejected"}})
+        users_col.update_one({"user_id": req['user_id']}, {"$inc": {"balance": req['amount']}})
+        bot.send_message(req['user_id'], "❌ আপনার পেমেন্ট রিজেক্ট করা হয়েছে এবং ব্যালেন্স ফেরত দেওয়া হয়েছে।")
+    bot.delete_message(call.message.chat.id, call.message.message_id)
 
-# আর্নিং পেজ (অ্যাড দেখার জন্য)
+# --- ইউজার বাটন হ্যান্ডলার ---
+@bot.message_handler(func=lambda m: True)
+def handle_buttons(message):
+    s = get_settings()
+    user_id = message.chat.id
+    user = users_col.find_one({"user_id": user_id})
+
+    if message.text == s['menu_earn']:
+        markup = telebot.types.InlineKeyboardMarkup()
+        markup.add(telebot.types.InlineKeyboardButton("🔗 ওপেন আর্নিং পেজ", url=f"https://{BASE_URL}/earn/{user_id}"))
+        bot.send_message(user_id, "নিচের লিঙ্কে ক্লিক করে অ্যাড দেখুন:", reply_markup=markup)
+
+    elif message.text == s['menu_bal']:
+        bot.send_message(user_id, f"👤 নাম: {user['name']}\n💰 ব্যালেন্স: {user['balance']:.2f} {s['currency']}\n✅ ক্লিক: {user['clicks']}")
+
+    elif message.text == s['menu_ref']:
+        bot_username = bot.get_me().username
+        link = f"https://t.me/{bot_username}?start={user_id}"
+        bot.send_message(user_id, f"👥 প্রতি রেফারে পাবেন {s['per_ref']} {s['currency']}\n\nআপনার লিঙ্ক: {link}")
+
+    elif message.text == s['menu_wit']:
+        if user['balance'] < s['min_withdraw']:
+            bot.send_message(user_id, f"⚠️ মিনিমাম উইথড্র {s['min_withdraw']} {s['currency']}")
+        else:
+            msg = bot.send_message(user_id, "আপনার নাম্বার ও পেমেন্ট মেথড লিখুন (যেমন: 017xx... Bikash):")
+            bot.register_next_step_handler(msg, process_wit_req, user['balance'])
+
+def process_wit_req(message, amount):
+    user_id = message.chat.id
+    method = message.text
+    withdraw_col.insert_one({
+        "user_id": user_id, "amount": amount, "method": method, "status": "pending"
+    })
+    users_col.update_one({"user_id": user_id}, {"$set": {"balance": 0.0}})
+    bot.send_message(user_id, "✅ আপনার উইথড্র রিকোয়েস্ট জমা হয়েছে।")
+
+# --- Flask Routes (Web) ---
 @app.route('/earn/<int:user_id>')
 def earn_page(user_id):
+    s = get_settings()
     html = f"""
-    <!DOCTYPE html>
     <html>
     <head>
         <title>Watch Ad</title>
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        {AD_SCRIPT}
+        <script src='//libtl.com/sdk.js' data-zone='{s['monetag_id']}' data-sdk='show_{s['monetag_id']}'></script>
         <style>
-            body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; text-align: center; background: #f0f2f5; padding-top: 50px; }}
-            .box {{ background: white; padding: 30px; border-radius: 15px; display: inline-block; box-shadow: 0 4px 15px rgba(0,0,0,0.1); width: 85%; max-width: 400px; }}
-            .btn-show {{ background: #007bff; color: white; padding: 15px 25px; border: none; border-radius: 8px; font-size: 18px; cursor: pointer; transition: 0.3s; }}
-            .btn-claim {{ background: #28a745; color: white; padding: 15px 25px; border: none; border-radius: 8px; font-size: 18px; cursor: pointer; display: none; }}
+            body {{ font-family: sans-serif; text-align: center; padding-top: 50px; background: #f4f4f4; }}
+            .box {{ background: white; padding: 20px; border-radius: 10px; display: inline-block; width: 80%; box-shadow: 0 0 10px #ccc; }}
+            .btn {{ background: #28a745; color: white; padding: 15px; border: none; border-radius: 5px; font-size: 18px; cursor: pointer; display:none; }}
+            .loader {{ font-size: 18px; color: #007bff; }}
         </style>
     </head>
     <body>
         <div class="box">
-            <h2>💰 অ্যাড দেখে টাকা নিন</h2>
-            <p>নিচের বাটনে ক্লিক করে অ্যাড দেখুন। ৫ সেকেন্ড পর ক্লেম বাটন আসবে।</p>
-            
-            <button id="adBtn" class="btn-show" onclick="startAd()">১. অ্যাড দেখুন</button>
-
-            <form action="/claim" method="POST">
+            <h2>Ad Loading...</h2>
+            <p id="timer">অ্যাডটি লোড হচ্ছে, ৫ সেকেন্ড অপেক্ষা করুন...</p>
+            <button id="claimBtn" class="btn" onclick="document.getElementById('claimForm').submit()">💰 টাকা সংগ্রহ করুন</button>
+            <form id="claimForm" action="/claim" method="POST">
                 <input type="hidden" name="user_id" value="{user_id}">
-                <button type="submit" id="claimBtn" class="btn-claim">২. টাকা সংগ্রহ করুন</button>
             </form>
         </div>
-
         <script>
-            function startAd() {{
-                if (typeof show_10351894 === 'function') {{
-                    show_10351894();
-                }}
-                
-                setTimeout(function() {{
-                    document.getElementById('adBtn').style.display = 'none';
-                    document.getElementById('claimBtn').style.display = 'inline-block';
-                }}, 5000);
-            }}
+            setTimeout(function() {{
+                if (typeof show_{s['monetag_id']} === 'function') {{ show_{s['monetag_id']}(); }}
+                document.getElementById('timer').style.display = 'none';
+                document.getElementById('claimBtn').style.display = 'block';
+            }}, 5000);
         </script>
     </body>
     </html>
@@ -144,10 +209,10 @@ def earn_page(user_id):
 @app.route('/claim', methods=['POST'])
 def claim():
     user_id = int(request.form.get('user_id'))
-    users_col.update_one({"user_id": user_id}, {"$inc": {"balance": 0.50, "clicks": 1}})
-    return "<h1>✅ ০.৫০ টাকা সফলভাবে যোগ হয়েছে!</h1><p>এখন এই পেজটি কেটে দিয়ে টেলিগ্রাম বটে ফিরে যান।</p>"
+    s = get_settings()
+    users_col.update_one({"user_id": user_id}, {"$inc": {"balance": s['per_click'], "clicks": 1}})
+    return f"<h1>সাফল্য! {s['per_click']} {s['currency']} যোগ হয়েছে।</h1>"
 
-# Webhook Route
 @app.route('/' + TOKEN, methods=['POST'])
 def getMessage():
     json_string = request.get_data().decode('utf-8')
@@ -159,7 +224,7 @@ def getMessage():
 def main():
     bot.remove_webhook()
     bot.set_webhook(url=f"https://{BASE_URL}/{TOKEN}")
-    return "Bot is Running Successfully!", 200
+    return "Bot is Running!", 200
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get('PORT', 5000)))
