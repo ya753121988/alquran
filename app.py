@@ -8,7 +8,7 @@ app = Flask(__name__)
 # --- কনফিগারেশন ---
 # Vercel-এ ডিপ্লয় করার সময় Environment Variable হিসেবে MONGODB_URI সেট করবেন।
 # লোকাল পিসিতে টেস্ট করার জন্য নিচে আপনার লিঙ্কটি দিন।
-MONGO_URI = os.getenv("MONGODB_URI", "আপনার_মংগোডিবি_লিঙ্ক_এখানে_দিন")
+MONGO_URI = os.getenv("MONGODB_URI", "mongodb+srv://Demo270:Demo270@cluster0.ls1igsg.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0")
 client = MongoClient(MONGO_URI)
 db = client['quran_db']
 collection = db['surahs']
