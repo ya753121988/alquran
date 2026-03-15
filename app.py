@@ -4,7 +4,7 @@ from flask import Flask, request, render_template_string, jsonify, redirect
 from pymongo import MongoClient
 from bson.objectid import ObjectId
 
-# --- ১. কনফিগারেশন (আপনার তথ্য অনুযায়ী) ---
+# --- ১. কনফিগারেশন ---
 MONGO_URI = "mongodb+srv://Demo270:Demo270@cluster0.ls1igsg.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
 BOT_TOKEN = "8796601390:AAFsWMertAVwnnmCL1KT2i6DbH8vHOJirkk"
 BASE_URL = "alquran-dun.vercel.app"
@@ -12,17 +12,16 @@ ADMIN_PASS = "admin123"
 
 # --- ২. ডাটাবেস কানেকশন ---
 client = MongoClient(MONGO_URI)
-db = client['monetag_final_v2_db']
+db = client['monetag_pure_db']
 users_col, settings_col, gateways_col, withdraws_col = db['users'], db['settings'], db['gateways'], db['withdraws']
 
-# ডিফল্ট সেটিংস (Monetag ফিক্সড)
+# ডিফল্ট সেটিংস
 if not settings_col.find_one({"type": "config"}):
     settings_col.insert_one({
         "type": "config", 
         "monetag_id": "10351894", 
         "monetag_pts": 15, 
         "monetag_status": "on", 
-        "monetag_link": "", # Monetag Direct Link এখানে দিবেন ব্যাকআপ হিসেবে
         "currency": "BDT"
     })
 
@@ -41,15 +40,14 @@ CSS = """
     .balance-value { font-size: 45px; font-weight: bold; margin: 10px 0; }
     .btn { display: block; width: 100%; padding: 16px; margin: 12px 0; border: none; border-radius: 12px; font-weight: bold; cursor: pointer; font-size: 17px; transition: 0.3s; color: white; text-decoration: none; }
     .btn-monetag { background: #5f27cd; box-shadow: 0 4px #3d1d91; }
-    .btn-monetag:active { transform: translateY(4px); box-shadow: none; }
     .btn-withdraw { background: var(--success); }
     input, select { width: 100%; padding: 14px; margin: 10px 0; border: 1px solid #ddd; border-radius: 10px; }
-    .status-tag { font-size: 12px; color: #e67e22; font-weight: bold; display: none; }
+    .status-tag { font-size: 13px; color: #e67e22; font-weight: bold; display: none; margin-bottom: 10px; }
     
-    /* Admin Sidebar */
-    .sidebar { background: var(--dark); color: white; width: 100%; display: flex; overflow-x: auto; position: sticky; top: 0; z-index: 1000; padding: 10px; }
-    .menu-item { padding: 10px 20px; white-space: nowrap; cursor: pointer; border-radius: 8px; }
-    .menu-item.active { background: var(--primary); }
+    /* Admin Simple Nav */
+    .admin-nav { background: var(--dark); display: flex; overflow-x: auto; padding: 10px; sticky: top; z-index: 1000; }
+    .nav-item { color: white; padding: 10px 20px; cursor: pointer; white-space: nowrap; border-radius: 5px; }
+    .nav-item.active { background: var(--primary); }
     .admin-main { padding: 20px; }
     .tab-content { display: none; }
     .tab-content.active { display: block; }
@@ -69,12 +67,12 @@ USER_HTML = CSS + """
 
     <div class="card">
         <h3 style="margin-bottom:20px;">অ্যাড দেখে ইনকাম করুন</h3>
-        <div id="loading_msg" class="status-tag">অ্যাড লোড হচ্ছে, দয়া করে অপেক্ষা করুন...</div>
+        <div id="status_msg" class="status-tag">অ্যাড লোড হচ্ছে, দয়া করে অপেক্ষা করুন...</div>
         
         {% if config.monetag_status == 'on' %}
-        <button class="btn btn-monetag" onclick="startMonetagAd()">💰 ওয়াচ রিওয়ার্ডেড অ্যাড (+{{ config.monetag_pts }})</button>
+        <button class="btn btn-monetag" onclick="showAd()">💰 ওয়াচ রিওয়ার্ডেড অ্যাড (+{{ config.monetag_pts }})</button>
         {% else %}
-        <p style="color:gray;">বর্তমানে কোন কাজ নেই।</p>
+        <p style="color:gray;">বর্তমানে অ্যাড বন্ধ আছে।</p>
         {% endif %}
     </div>
 
@@ -99,46 +97,32 @@ USER_HTML = CSS + """
 <script src='//libtl.com/sdk.js' data-zone='{{ config.monetag_id }}' data-sdk='show_{{ config.monetag_id }}'></script>
 
 <script>
-function claimReward() {
+function rewardUser() {
     fetch(`/add_pts?id={{ user.user_id }}&amt={{ config.monetag_pts }}`)
     .then(res => res.json())
     .then(data => {
-        alert("অভিনন্দন! {{ config.monetag_pts }} পয়েন্ট যোগ হয়েছে।");
+        alert("সফল! {{ config.monetag_pts }} পয়েন্ট যোগ হয়েছে।");
         location.reload();
     });
 }
 
-function startMonetagAd() {
-    const status = document.getElementById('loading_msg');
+function showAd() {
+    const status = document.getElementById('status_msg');
+    const adFuncName = 'show_{{ config.monetag_id }}';
+    
     status.style.display = 'block';
-    
-    // Monetag function name from Zone ID
-    let adFunc = 'show_{{ config.monetag_id }}';
-    
-    if (typeof window[adFunc] === 'function') {
-        window[adFunc]().then(() => {
+
+    if (typeof window[adFuncName] === 'function') {
+        window[adFuncName]().then(() => {
             status.style.display = 'none';
-            claimReward();
+            rewardUser();
         }).catch((e) => {
             status.style.display = 'none';
-            console.error("Ad Error:", e);
-            // Fallback to Direct Link if script fails
-            if ("{{ config.monetag_link }}") {
-                window.open("{{ config.monetag_link }}", "_blank");
-                claimReward();
-            } else {
-                alert("অ্যাড লোড হয়নি। আপনার ব্রাউজারের AdBlocker বন্ধ করুন।");
-            }
+            alert("অ্যাড লোড হতে সমস্যা হয়েছে। আপনার ব্রাউজারের AdBlocker বন্ধ করুন এবং ডোমেইন ভেরিফাই আছে কিনা নিশ্চিত করুন।");
         });
     } else {
         status.style.display = 'none';
-        // If script not loaded, try Direct Link immediately
-        if ("{{ config.monetag_link }}") {
-            window.open("{{ config.monetag_link }}", "_blank");
-            claimReward();
-        } else {
-            alert("অ্যাড স্ক্রিপ্ট রেডি হচ্ছে না। দয়া করে পেজটি রিফ্রেশ দিন।");
-        }
+        alert("অ্যাড স্ক্রিপ্ট এখনো তৈরি হয়নি। দয়া করে ৫ সেকেন্ড অপেক্ষা করে আবার চেষ্টা করুন।");
     }
 }
 </script>
@@ -146,17 +130,16 @@ function startMonetagAd() {
 
 # --- ৫. অ্যাডমিন প্যানেল HTML ---
 ADMIN_HTML = CSS + """
-<div class="sidebar">
-    <div class="menu-item active" onclick="tab(event, 'dash')">ড্যাশবোর্ড</div>
-    <div class="menu-item" onclick="tab(event, 'ads')">মনিটেগ সেটিংস</div>
-    <div class="menu-item" onclick="tab(event, 'pay')">পেমেন্ট মেথড</div>
-    <div class="menu-item" onclick="tab(event, 'req')">রিকোয়েস্ট</div>
-    <div class="menu-item" onclick="tab(event, 'user')">ইউজার লিস্ট</div>
+<div class="admin-nav">
+    <div class="nav-item active" onclick="tab(event, 'dash')">ড্যাশবোর্ড</div>
+    <div class="nav-item" onclick="tab(event, 'ads')">অ্যাড সেটিংস</div>
+    <div class="nav-item" onclick="tab(event, 'pay')">পেমেন্ট মেথড</div>
+    <div class="nav-item" onclick="tab(event, 'req')">রিকোয়েস্ট</div>
+    <div class="nav-item" onclick="tab(event, 'user')">ইউজার লিস্ট</div>
 </div>
 
 <div class="admin-main">
     <div id="dash" class="tab-content active">
-        <h2>পরিসংখ্যান</h2>
         <div style="display:flex; gap:10px;">
             <div class="card" style="flex:1;"><h3>{{ users|length }}</h3><p>মোট ইউজার</p></div>
             <div class="card" style="flex:1;"><h3>{{ withdraws|length }}</h3><p>পেন্ডিং উইথড্র</p></div>
@@ -164,27 +147,25 @@ ADMIN_HTML = CSS + """
     </div>
 
     <div id="ads" class="tab-content">
-        <h2>Monetag Control</h2>
         <form action="/admin/save_config" method="POST" class="card" style="text-align:left;">
+            <h3>Monetag SDK Settings</h3>
             Zone ID: <input name="monetag_id" value="{{ config.monetag_id }}">
-            Points: <input type="number" name="monetag_pts" value="{{ config.monetag_pts }}">
-            Direct Link (Backup): <input name="monetag_link" value="{{ config.monetag_link }}" placeholder="https://...">
+            Points per Ad: <input type="number" name="monetag_pts" value="{{ config.monetag_pts }}">
             Status: 
             <select name="monetag_status">
                 <option value="on" {% if config.monetag_status=='on' %}selected{% endif %}>On</option>
                 <option value="off" {% if config.monetag_status=='off' %}selected{% endif %}>Off</option>
             </select>
-            Currency: <input name="currency" value="{{ config.currency }}">
+            Currency Name: <input name="currency" value="{{ config.currency }}">
             <button class="btn btn-withdraw">Save Settings</button>
         </form>
     </div>
 
     <div id="pay" class="tab-content">
-        <h2>Gateways</h2>
         <form action="/admin/add_gateway" method="POST" class="card">
-            <input name="name" placeholder="বিকাশ / নগদ" required>
-            <input type="number" name="min" placeholder="মিনিমাম উইথড্র" required>
-            <button class="btn btn-withdraw">অ্যাড করুন</button>
+            <input name="name" placeholder="Gateway Name" required>
+            <input type="number" name="min" placeholder="Minimum Amount" required>
+            <button class="btn btn-withdraw">Add Gateway</button>
         </form>
         <table>
             <tr><th>Gateway</th><th>Min</th><th>Action</th></tr>
@@ -195,9 +176,8 @@ ADMIN_HTML = CSS + """
     </div>
 
     <div id="req" class="tab-content">
-        <h2>Withdraw Requests</h2>
         <table>
-            <tr><th>ইউজার আইডি</th><th>মেথড</th><th>নাম্বার</th><th>পরিমাণ</th><th>Action</th></tr>
+            <tr><th>ইউজার আইডি</th><th>মেথড</th><th>নাম্বার</th><th>পরিমাণ</th><th>অ্যাকশন</th></tr>
             {% for w in withdraws %}
             <tr><td>{{ w.user_id }}</td><td>{{ w.method }}</td><td>{{ w.number }}</td><td>{{ w.amount }}</td>
             <td><a href="/admin/approve/{{ w._id }}" style="color:green; font-weight:bold;">Approve</a></td></tr>
@@ -206,9 +186,8 @@ ADMIN_HTML = CSS + """
     </div>
 
     <div id="user" class="tab-content">
-        <h2>User Database</h2>
         <table>
-            <tr><th>ID</th><th>Name</th><th>Balance</th></tr>
+            <tr><th>ID</th><th>Name</th><th>Points</th></tr>
             {% for u in users %}
             <tr><td>{{ u.user_id }}</td><td>{{ u.name }}</td><td>{{ u.points }}</td></tr>
             {% endfor %}
@@ -221,7 +200,7 @@ function tab(evt, name) {
     var i, content, items;
     content = document.getElementsByClassName("tab-content");
     for (i = 0; i < content.length; i++) { content[i].style.display = "none"; }
-    items = document.getElementsByClassName("menu-item");
+    items = document.getElementsByClassName("nav-item");
     for (i = 0; i < items.length; i++) { items[i].classList.remove("active"); }
     document.getElementById(name).style.display = "block";
     evt.currentTarget.classList.add("active");
@@ -265,7 +244,6 @@ def save_c():
         "monetag_id": request.form.get('monetag_id'), 
         "monetag_pts": int(request.form.get('monetag_pts')), 
         "monetag_status": request.form.get('monetag_status'),
-        "monetag_link": request.form.get('monetag_link'),
         "currency": request.form.get('currency')
     }})
     return redirect(f'/admin?pass={ADMIN_PASS}')
@@ -299,7 +277,7 @@ def start_bot(message):
         users_col.insert_one({"user_id": uid, "name": name, "points": 0})
     markup = telebot.types.InlineKeyboardMarkup()
     markup.add(telebot.types.InlineKeyboardButton("🚀 ড্যাশবোর্ড", url=f"https://{BASE_URL}?id={uid}"))
-    bot.reply_to(message, f"স্বাগতম {name}!", reply_markup=markup)
+    bot.reply_to(message, f"আসসালামু আলাইকুম {name}!\nআর্নিং শুরু করতে নিচের বাটনে ক্লিক করুন।", reply_markup=markup)
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
