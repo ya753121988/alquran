@@ -1,99 +1,157 @@
 import os
-from flask import Flask, render_template_string, request, redirect, url_for
+from flask import Flask, request, jsonify, render_template_string
 from pymongo import MongoClient
-from bson.objectid import ObjectId
+import requests
 
 app = Flask(__name__)
 
-# আপনার দেওয়া মংগোডিবি কানেকশন
+# আপনার দেওয়া তথ্য
 MONGO_URI = "mongodb+srv://Demo270:Demo270@cluster0.ls1igsg.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
-client = MongoClient(MONGO_URI)
-db = client['user_apps_db']
-apps_collection = db['apps']
+BOT_TOKEN = "8796601390:AAFcVGlEaTvBACE-miekOgLok_VRwQ_HSM4"
+BASE_URL = "alquran-dun.vercel.app"
 
-# ডিজাইন (CSS)
-STYLE = """
-<style>
-    body { font-family: 'Arial', sans-serif; background: #f0f2f5; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-    .card { background: white; padding: 30px; border-radius: 15px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); width: 100%; max-width: 400px; text-align: center; }
-    input { width: 100%; padding: 12px; margin: 10px 0; border: 1px solid #ddd; border-radius: 8px; box-sizing: border-box; }
-    .btn { background: #007bff; color: white; padding: 12px; border: none; border-radius: 8px; cursor: pointer; width: 100%; font-size: 16px; }
-    .btn:hover { background: #0056b3; }
-    .result { margin-top: 20px; padding: 15px; background: #e9ecef; border-radius: 8px; word-break: break-all; }
-    iframe { width: 100%; height: 100vh; border: none; margin: 0; padding: 0; }
-    body.app-mode { margin: 0; padding: 0; overflow: hidden; }
-</style>
+# MongoDB কানেকশন
+client = MongoClient(MONGO_URI)
+db = client['ad_reward_db']
+users_col = db['users']
+
+# --- Frontend HTML ---
+HTML_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Earn Rewards - Ads</title>
+    <!-- Ad SDK -->
+    <script src='//libtl.com/sdk.js' data-zone='10351894' data-sdk='show_10351894'></script>
+</head>
+<body style="font-family: Arial; text-align: center; padding: 50px; background-color: #f4f4f4;">
+    <div style="background: white; padding: 20px; border-radius: 10px; display: inline-block; box-shadow: 0 0 10px rgba(0,0,0,0.1);">
+        <h2>Watch Ads & Earn</h2>
+        <p>User ID: <span id="userId" style="font-weight: bold; color: blue;">{{ user_id }}</span></p>
+        <p>Your Balance: <span id="balance" style="font-weight: bold; color: green;">Loading...</span></p>
+        
+        <hr>
+        
+        <button onclick="showPopAd()" style="background: #28a745; color: white; border: none; padding: 10px 20px; margin: 10px; cursor: pointer; border-radius: 5px;">
+            Watch Rewarded Pop-up (10 Points)
+        </button>
+        <br>
+        <button onclick="showInterstitialAd()" style="background: #007bff; color: white; border: none; padding: 10px 20px; margin: 10px; cursor: pointer; border-radius: 5px;">
+            Watch Rewarded Interstitial (20 Points)
+        </button>
+    </div>
+
+    <script>
+        // ১. In-App Interstitial (Automatic)
+        show_10351894({
+          type: 'inApp',
+          inAppSettings: {
+            frequency: 2, capping: 0.1, interval: 30, timeout: 5, everyPage: false
+          }
+        });
+
+        const userId = "{{ user_id }}";
+
+        // ব্যালেন্স চেক করার ফাংশন
+        function fetchBalance() {
+            if(userId === "Guest") return;
+            fetch(`/get_balance?user_id=${userId}`)
+                .then(res => res.json())
+                .then(data => {
+                    document.getElementById('balance').innerText = data.balance + " Points";
+                });
+        }
+        fetchBalance();
+
+        // ২. Rewarded Popup
+        function showPopAd() {
+            show_10351894('pop').then(() => {
+                updateReward(10);
+            }).catch(e => alert("Ad failed or closed early."));
+        }
+
+        // ৩. Rewarded Interstitial
+        function showInterstitialAd() {
+            show_10351894().then(() => {
+                alert('Success! You watched the full ad.');
+                updateReward(20);
+            });
+        }
+
+        // রিওয়ার্ড আপডেট করার ফাংশন
+        function updateReward(points) {
+            if(userId === "Guest") {
+                alert("Please log in via Telegram Bot first!");
+                return;
+            }
+            fetch('/add_reward', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ user_id: userId, points: points })
+            })
+            .then(res => res.json())
+            .then(data => {
+                alert(data.message);
+                fetchBalance();
+            });
+        }
+    </script>
+</body>
+</html>
 """
 
-# হোম পেজ (ইনপুট ফর্ম)
 @app.route('/')
 def index():
-    return render_template_string('''
-    <html><head><title>Web to App Maker</title>''' + STYLE + '''</head>
-    <body>
-        <div class="card">
-            <h2>Web to App Converter</h2>
-            <p>আপনার সাইটের লিঙ্ক দিয়ে অ্যাপ তৈরি করুন</p>
-            <form action="/create" method="POST">
-                <input type="text" name="name" placeholder="অ্যাপের নাম (যেমন: My Blog)" required>
-                <input type="url" name="url" placeholder="সাইট লিঙ্ক (https://...)" required>
-                <button type="submit" class="btn">অ্যাপ তৈরি করুন</button>
-            </form>
-        </div>
-    </body></html>
-    ''')
+    user_id = request.args.get('userId', 'Guest')
+    return render_template_string(HTML_TEMPLATE, user_id=user_id)
 
-# অ্যাপ তৈরি এবং ডাটাবেসে সেভ
-@app.route('/create', methods=['POST'])
-def create():
-    app_name = request.form.get('name')
-    app_url = request.form.get('url')
-    
-    # ডাটাবেসে ইনসার্ট
-    app_data = {"name": app_name, "url": app_url}
-    result = apps_collection.insert_one(app_data)
-    
-    # তৈরি হওয়া অ্যাপের ইউনিক লিঙ্ক
-    app_id = str(result.inserted_id)
-    full_url = request.host_url + "view/" + app_id
-    
-    return render_template_string('''
-    <html><head><title>Success</title>''' + STYLE + '''</head>
-    <body>
-        <div class="card">
-            <h2 style="color: green;">আপনার অ্যাপ তৈরি!</h2>
-            <p>নিচের লিঙ্কটি কপি করে ব্রাউজারে ওপেন করুন এবং "Add to Home Screen" দিন।</p>
-            <div class="result">
-                <a href="{{ url }}" target="_blank">{{ url }}</a>
-            </div>
-            <br><a href="/">নতুন আরেকটি তৈরি করুন</a>
-        </div>
-    </body></html>
-    ''', url=full_url)
+# ব্যালেন্স দেখার API
+@app.route('/get_balance')
+def get_balance():
+    u_id = request.args.get('user_id')
+    user = users_col.find_one({"user_id": str(u_id)})
+    return jsonify({"balance": user.get('balance', 0) if user else 0})
 
-# অ্যাপ ভিউ (ফুল স্ক্রিন ইফ্রেমে সাইট দেখানো)
-@app.route('/view/<app_id>')
-def view_app(app_id):
-    app_info = apps_collection.find_one({"_id": ObjectId(app_id)})
-    if not app_info:
-        return "অ্যাপটি খুঁজে পাওয়া যায়নি!", 404
+# রিওয়ার্ড যোগ করার API
+@app.route('/add_reward', methods=['POST'])
+def add_reward():
+    data = request.json
+    u_id = data.get('user_id')
+    points = data.get('points')
     
-    return render_template_string('''
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-        <title>{{ name }}</title>
-        <meta name="mobile-web-app-capable" content="yes">
-        <meta name="apple-mobile-web-app-capable" content="yes">
-        ''' + STYLE + '''
-    </head>
-    <body class="app-mode">
-        <iframe src="{{ url }}"></iframe>
-    </body>
-    </html>
-    ''', name=app_info['name'], url=app_info['url'])
+    if u_id and u_id != "Guest":
+        users_col.update_one(
+            {"user_id": str(u_id)},
+            {"$inc": {"balance": points}},
+            upsert=True
+        )
+        return jsonify({"message": f"Success! {points} points added."})
+    return jsonify({"message": "Error: User ID not found"}), 400
+
+# টেলিগ্রাম বট ওয়েব হুক
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    update = request.json
+    if "message" in update:
+        chat_id = update["message"]["chat"]["id"]
+        text = update["message"].get("text", "")
+
+        if text == "/start":
+            url = f"https://{BASE_URL}/?userId={chat_id}"
+            welcome_msg = "Welcome! Click the button below to start earning points by watching ads."
+            
+            payload = {
+                "chat_id": chat_id,
+                "text": welcome_msg,
+                "reply_markup": {
+                    "inline_keyboard": [[{"text": "🚀 Open App & Earn", "url": url}]]
+                }
+            }
+            requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json=payload)
+            
+    return "OK", 200
 
 if __name__ == '__main__':
     app.run(debug=True)
